@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { JaslynProvider } from "../../../src/intelligence/provider.js";
+import { JaslynProvider } from "../../../src/intelligence/provider";
 
 const schema=z.object({instruction:z.string().trim().min(1).max(4000),context:z.record(z.string(),z.unknown()).optional()});
 
