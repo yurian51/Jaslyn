@@ -31,7 +31,7 @@ export class JaslynAgent {
     if(!check.valid) throw new Error(`Mind self-check failed: ${check.issues.join("; ")}`);
     const plan=await this.planner.create(goal);
     const policy=this.governance.evaluate(instruction,decision.requiresApproval?"reversible":"none");
-    if(!policy.allowed) return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results:[],verification:{verified:false,reason:policy.reason},audit:this.audit.append({actor:"jaslyn",action:instruction,result:"blocked"})};
+    if(!policy.allowed) return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results:[],verification:{success:false,completed:0,failed:0,blocked:0,details:policy.reason},audit:this.audit.append({actor:"jaslyn",action:instruction,result:"blocked"})};
     const toolContext:ToolContext={runId:crypto.randomUUID(),agentId:"jaslyn-core"};
     const results=policy.requiresApproval?[]:await this.executor.execute(plan,toolContext);
     const verification = policy.requiresApproval ? { success:false, completed:0, failed:0, blocked:0, details:"Approval required before external side effects." } : this.verifier.verify(plan,results);
