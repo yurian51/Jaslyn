@@ -1,0 +1,2 @@
+import type {ActionResult,ToolDefinition} from "./types.js";
+export class ActionRunner{async run(tool:ToolDefinition,input:unknown):Promise<ActionResult>{const start=Date.now();try{return{tool:tool.name,success:true,output:await tool.execute(input),durationMs:Date.now()-start};}catch(error){return{tool:tool.name,success:false,error:error instanceof Error?error.message:"Unknown tool failure",durationMs:Date.now()-start};}}}
