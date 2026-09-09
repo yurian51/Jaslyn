@@ -4,7 +4,7 @@ import { DefaultPolicyEngine } from "./core/policy.js";
 import { Planner } from "./core/planner.js";
 import { ToolRegistry } from "./core/tool-registry.js";
 import { VerificationEngine } from "./core/verification.js";
-import { DeterministicProvider } from "./intelligence/provider.js";
+import { JaslynProvider } from "./intelligence/provider.js";
 import { echoTool } from "./tools/echo.js";
 
 const registry = new ToolRegistry();
