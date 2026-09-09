@@ -1,11 +1,11 @@
 {
   "name":"jaslyn",
-  "version":"0.1.0",
+  "version":"0.2.0",
   "private":true,
-  "description":"Jaslyn, a production-oriented JARVIS-class autonomous AI agent runtime.",
+  "description":"Jaslyn, a JARVIS-class autonomous AI agent runtime and control surface.",
   "type":"module",
-  "scripts":{"build":"tsc -p tsconfig.json","dev":"tsx src/index.ts","start":"node dist/index.js","typecheck":"tsc --noEmit","test":"node --test"},
+  "scripts":{"dev":"next dev","build":"next build","start":"next start","typecheck":"tsc --noEmit","test":"node --test"},
   "engines":{"node":">=22"},
-  "dependencies":{"zod":"^4.1.5"},
-  "devDependencies":{"@types/node":"^24.0.0","tsx":"^4.20.3","typescript":"^5.9.2"}
+  "dependencies":{"next":"^15.5.0","react":"^19.1.1","react-dom":"^19.1.1","zod":"^4.1.5"},
+  "devDependencies":{"@types/node":"^24.0.0","@types/react":"^19.1.10","@types/react-dom":"^19.1.7","tsx":"^4.20.3","typescript":"^5.9.2"}
 }
