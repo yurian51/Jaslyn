@@ -1,70 +1,63 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-type Run={goal:string;status:string;reasoning:string;intent:string;decision:string;needsApproval:boolean;approvalReason:string;steps:string[];error?:string};
+type Run={goal:string;status:string;reasoning:string;intent:string;decision:string;needsApproval:boolean;approvalReason:string;steps:string[];execution?:{events:Array<{index:number;description:string;status:string}>;completed:number;verified:number;blocked:number;maxSteps:number};error?:string};
 type Message={role:"user"|"jaslyn";content:string;run?:Run};
 
-const starterPrompts=[
-  "Analyze my project and tell me the highest-risk production issues.",
-  "Design a production architecture for an autonomous AI agent.",
-  "Plan the safest way to deploy this application and verify it."
-];
+const navItems=["Command","Memory","Objectives","Automations","Tools","Activity"];
+const starters=["Analyze my project and tell me the highest-risk production issues.","Design a production architecture for an autonomous AI agent.","Plan the safest way to deploy this application and verify it."];
+
+function Badge({children,tone="neutral"}:{children:React.ReactNode;tone?:"neutral"|"green"|"violet"|"warn"}){return <span className={`badge ${tone}`}>{children}</span>}
+function Section({title,children}:{title:string;children:React.ReactNode}){return <section className="context-section"><small>{title}</small>{children}</section>}
 
 export default function Home(){
- const [input,setInput]=useState("");
- const [messages,setMessages]=useState<Message[]>([]);
- const [running,setRunning]=useState(false);
- const [active,setActive]=useState("Command");
- const endRef=useRef<HTMLDivElement>(null);
+ const [input,setInput]=useState(""); const [messages,setMessages]=useState<Message[]>([]); const [running,setRunning]=useState(false); const [active,setActive]=useState("Command"); const [traceOpen,setTraceOpen]=useState(true); const [approval,setApproval]=useState(true); const [palette,setPalette]=useState(false); const [mobileNav,setMobileNav]=useState(false); const [pythonStatus,setPythonStatus]=useState("Python bridge ready"); const [memoryText,setMemoryText]=useState(""); const [memoryQuery,setMemoryQuery]=useState(""); const [memoryItems,setMemoryItems]=useState<Array<{id:string;content:string;category:string;importance:number}>>([]); const endRef=useRef<HTMLDivElement>(null);
  useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[messages,running]);
-
+ useEffect(()=>{const fn=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setPalette(v=>!v)}if(e.key==="Escape")setPalette(false)};window.addEventListener("keydown",fn);return()=>window.removeEventListener("keydown",fn)},[]);
+ async function memoryAction(tool:string,args:Record<string,unknown>={}){const r=await fetch("/api/python",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({tool,args})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Memory operation failed");return d}
+ async function saveMemory(){if(!memoryText.trim())return;await memoryAction("memory_store",{content:memoryText,category:"explicit",importance:4});setMemoryText("");await loadMemories()}
+ async function loadMemories(){try{const d=await memoryAction(memoryQuery.trim()?"memory_search":"memory_list",memoryQuery.trim()?{query:memoryQuery}:{limit:20});setMemoryItems(d.memories||[])}catch{setMemoryItems([])}}
+ async function probePython(){setPythonStatus("Running Python tool…");try{const r=await fetch("/api/python",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({tool:"system_snapshot"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Python bridge failed");setPythonStatus(`Python ${d.snapshot?.python||"ready"} · ${d.snapshot?.platform||"local"}`)}catch(error){setPythonStatus(error instanceof Error?error.message:"Python bridge offline")}}
  async function submit(e?:FormEvent){
-  e?.preventDefault(); const text=input.trim(); if(!text||running)return;
-  setInput(""); setMessages(m=>[...m,{role:"user",content:text}]); setRunning(true);
+  e?.preventDefault();
+  const text=input.trim();
+  if(!text||running)return;
+  setInput("");
+  const next=[...messages,{role:"user" as const,content:text}];
+  setMessages(next);
+  setRunning(true);
   try{
-   const r=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:text,context:{conversation:messages.slice(-8)}})});
+   const chatMessages=next.slice(-20).map(message=>({role:message.role === "jaslyn" ? "assistant" as const : message.role,content:message.content}));
+   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:chatMessages})});
    const d=await r.json();
-   if(!r.ok) throw new Error(d.error||"Jaslyn brain is unavailable.");
-   setMessages(m=>[...m,{role:"jaslyn",content:d.reasoning,run:d}]);
-  }catch(error){
-   setMessages(m=>[...m,{role:"jaslyn",content:"My private reasoning core is currently offline.",run:{goal:text,status:"brain_offline",reasoning:"",intent:"",decision:"",needsApproval:false,approvalReason:"",steps:[],error:error instanceof Error?error.message:"Unknown error"}}]);
-  }finally{setRunning(false);}
+   if(!r.ok)throw new Error(d.error||"Jaslyn brain is unavailable.");
+   setMessages(m=>[...m,{role:"jaslyn",content:d.message.content}]);
+  }catch(error){setMessages(m=>[...m,{role:"jaslyn",content:error instanceof Error?error.message:"Jaslyn chat is offline."}])}
+  finally{setRunning(false)}
  }
+ const clear=()=>setMessages([]);
  return <main className="shell">
-  <aside className="sidebar">
-   <div className="brand"><div className="brand-mark">J</div><div><b>JASLYN</b><small>PRIVATE INTELLIGENCE</small></div></div>
-   <button className="new-chat" onClick={()=>setMessages([])}>＋ New session</button>
-   <nav>
-    {["Command","Memory","Objectives","Automations","Tools","Activity"].map(item=><button key={item} className={active===item?"active":""} onClick={()=>setActive(item)}><span>{item==="Command"?"⌘":item==="Memory"?"◌":item==="Objectives"?"◇":item==="Automations"?"◷":item==="Tools"?"⊞":"◍"}</span>{item}</button>)}
-   </nav>
-   <div className="sidebar-bottom"><div className="brain-state"><i/>Private brain<br/><span>Self-hosted inference</span></div><div className="user-card"><div className="avatar">Y</div><div><b>Yurian</b><small>Owner</small></div><span>•••</span></div></div>
+  <aside className={`sidebar ${mobileNav?"mobile-open":""}`}>
+   <div className="brand"><div className="brand-mark">✦</div><div><b>JASLYN</b><small>INDEPENDENT AGENT SYSTEM</small></div><button className="mobile-close" onClick={()=>setMobileNav(false)}>×</button></div>
+   <button className="new-chat" onClick={clear}>＋ New session <kbd>N</kbd></button>
+   <div className="nav-label">WORKSPACE</div><nav>{navItems.map((item,i)=><button key={item} className={active===item?"active":""} onClick={()=>{setActive(item);setMobileNav(false)}}><span>{["⌘","◌","◇","◷","⊞","◍"][i]}</span>{item}{item==="Objectives"&&<em>2</em>}</button>)}</nav>
+   <div className="sidebar-bottom"><div className="brain-state"><i/> Runtime operational<br/><span>Private workspace · v0.8.4</span></div><div className="user-card"><div className="avatar">Y</div><div><b>Yurian</b><small>Workspace owner</small></div><span>•••</span></div></div>
   </aside>
+  {mobileNav&&<button className="mobile-backdrop" onClick={()=>setMobileNav(false)} aria-label="Close navigation"/>}
   <section className="main">
-   <header className="topbar"><div><span>COMMAND CENTER</span><h1>{active}</h1></div><div className="top-actions"><button>⌘ K</button><button>◌</button><button>⚙</button></div></header>
+   <header className="topbar"><div className="top-title"><button className="mobile-menu" onClick={()=>setMobileNav(true)}>☰</button><div><span>JASLYN / COMMAND CENTER</span><h1>{active}</h1></div></div><div className="top-actions"><button onClick={()=>setPalette(true)}>⌘ K <small>Search</small></button><button>◌</button><button>⚙</button></div></header>
    <div className="conversation">
-    {messages.length===0?<div className="welcome">
-      <div className="orb"><span>J</span></div>
-      <span className="eyebrow">JASLYN / PRIVATE AI</span>
-      <h2>What are we solving?</h2>
-      <p>Give Jaslyn an outcome. It will understand the request, reason about the constraints, build a plan, and only take action when the runtime has an authorized tool.</p>
-      <div className="suggestions">{starterPrompts.map(p=><button key={p} onClick={()=>setInput(p)}>{p}<span>↗</span></button>)}</div>
-    </div>:<>{messages.map((m,i)=><article className={`message ${m.role}`} key={i}>
-      <div className="message-avatar">{m.role==="user"?"Y":"J"}</div><div className="message-body"><div className="message-meta">{m.role==="user"?"You":"Jaslyn"} <span>{m.role==="jaslyn"?"Private reasoning":"Just now"}</span></div><div className="message-text">{m.content}</div>
-      {m.run&&m.run.status!=="brain_offline"&&<div className="agent-panel">
-       <div className="panel-head"><span>REASONING TRACE</span><b>{m.run.needsApproval?"APPROVAL REQUIRED":"PLAN READY"}</b></div>
-       <div className="facts"><div><small>INTENT</small><strong>{m.run.intent||"—"}</strong></div><div><small>DECISION</small><strong>{m.run.decision||"—"}</strong></div></div>
-       <div className="steps"><small>EXECUTION PLAN</small>{m.run.steps.map((s,n)=><div className="step" key={n}><b>{String(n+1).padStart(2,"0")}</b><span>{s}</span></div>)}</div>
-       {m.run.needsApproval&&<div className="approval"><b>Approval required</b><span>{m.run.approvalReason}</span><button>Review action</button></div>}
-      </div>}
-      {m.run?.error&&<div className="offline"><b>PRIVATE BRAIN OFFLINE</b><span>{m.run.error}</span></div>}
-      </div>
-    </article>)}</>}
-    {running&&<article className="message jaslyn"><div className="message-avatar">J</div><div className="message-body"><div className="message-meta">Jaslyn <span>Reasoning</span></div><div className="thinking"><i/><i/><i/><span>Understanding objective…</span></div></div></article>}
+    {active !== "Command" && <div className="workspace-view"><div className="view-icon">{active === "Memory" ? "◌" : active === "Objectives" ? "◇" : active === "Automations" ? "◷" : active === "Tools" ? "⊞" : "◍"}</div><span className="eyebrow">JASLYN / {active.toUpperCase()}</span><h2>{active} center</h2><p>{active === "Memory" ? "Semantic memories, recent events, and explicit preferences with owner-controlled retention." : active === "Automations" ? "Background objectives and recurring agent work, with pause, approval, and recovery controls." : active === "Tools" ? "Registered capabilities with visible permission scopes, policy gates, and verification requirements." : active === "Activity" ? "An auditable feed of decisions, tool calls, approvals, and verification evidence." : "Objectives are autonomous workspaces with an explicit operational loop and no exposed chain-of-thought."}</p><>{active === "Tools" && <div className="python-runtime"><div><small>PYTHON RUNTIME</small><strong>{pythonStatus}</strong></div><button onClick={probePython}>Run snapshot</button></div>}{active === "Memory" && <div className="memory-browser"><div className="memory-controls"><input value={memoryText} onChange={e=>setMemoryText(e.target.value)} placeholder="Save an explicit memory…"/><button onClick={saveMemory}>Remember</button></div><div className="memory-controls"><input value={memoryQuery} onChange={e=>setMemoryQuery(e.target.value)} placeholder="Search long-term memory…"/><button onClick={loadMemories}>Search</button></div>{memoryItems.map(item=><div className="memory-item" key={item.id}><span>{item.category} · importance {item.importance}/5</span><strong>{item.content}</strong><button onClick={async()=>{await memoryAction("memory_delete",{id:item.id});await loadMemories()}}>Delete</button></div>)}</div>}</><div className="view-grid">{["Observe signals", "Plan bounded action", "Request approval", "Verify evidence"].map((x, i) => <div className="view-card" key={x}><small>{String(i + 1).padStart(2, "0")}</small><strong>{active === "Memory" ? ["Semantic memories", "Recent events", "User preferences", "Retention controls"][i] : active === "Automations" ? ["Daily product pulse", "Workspace indexing", "Paused jobs", "Failure recovery"][i] : active === "Tools" ? ["Browser · read-only", "Files · read/write", "Calendar · disconnected", "Policy scopes"][i] : active === "Activity" ? ["Action approved", "Source indexed", "Verification passed", "Session created"][i] : x}</strong><span>Available in this reference workspace</span></div>)}</div></div>}
+    {active === "Command" && <>
+      {messages.length === 0 && <div className="welcome"><div className="orb"><span>✦</span></div><span className="eyebrow">PRIVATE AGENT WORKSPACE / READY</span><h2>What are we solving?</h2><p>Give Jaslyn an outcome. It will understand the request, plan within your boundaries, and only take action through registered tools with verification.</p><div className="suggestions">{starters.map(p => <button key={p} onClick={() => setInput(p)}>{p}<span>↗</span></button>)}</div></div>}
+      {messages.length > 0 && messages.map((m, i) => <article className={`message ${m.role}`} key={i}><div className="message-avatar">{m.role === "user" ? "Y" : "✦"}</div><div className="message-body"><div className="message-meta">{m.role === "user" ? "You" : "Jaslyn"}<span>{m.role === "jaslyn" ? "Operational summary" : "Just now"}</span></div><div className="message-text">{m.content}</div>{m.run && m.run.status !== "brain_offline" && <div className="agent-panel"><div className="panel-head"><span>DEEP EXECUTION · {m.run.execution?.events.length || m.run.steps.length} EVENTS / MAX 100 <button className="trace-toggle" onClick={() => setTraceOpen(v => !v)}>{traceOpen ? "Collapse" : "Expand"}⌄</button></span><b>{m.run?.needsApproval ? "APPROVAL REQUIRED" : "EXECUTED"}</b></div>{m.run.execution && <div className="execution-metrics"><span><b>{m.run.execution.completed}</b> completed</span><span><b>{m.run.execution.verified}</b> verified</span><span><b>{m.run.execution.blocked}</b> blocked</span></div>}<div className="loop"><div className="loop-title"><span>Autonomous loop · operational summaries only</span><Badge tone="violet">Acting</Badge></div><div className="loop-steps">{["Observe", "Understand", "Plan", "Act", "Verify", "Learn"].map((step, n) => <div className={n < 4 ? "done" : n === 4 ? "current" : "pending"} key={step}><i>{n < 4 ? "✓" : n + 1}</i><span>{step}</span></div>)}</div></div>{traceOpen && <><div className="facts"><div><small>INTENT</small><strong>{m.run?.intent || "—"}</strong></div><div><small>DECISION</small><strong>{m.run?.decision || "—"}</strong></div></div><div className="steps"><small>EXECUTION EVENTS · EVIDENCE, NOT CHAIN-OF-THOUGHT</small>{m.run?.steps?.map((step, n) => <div className="step" key={n}><b>{String(n + 1).padStart(3, "0")}</b><span>{step}</span><Badge tone={step.endsWith("blocked") ? "warn" : "green"}>{step.endsWith("blocked") ? "Blocked" : "Verified"}</Badge></div>)}</div></>}{m.run?.needsApproval && approval && <div className="approval"><b>Approval required · external action</b><span>{m.run?.approvalReason || "Jaslyn prepared an action that leaves the private workspace."}</span><button onClick={() => setApproval(false)}>Approve action</button><button className="secondary" onClick={() => setApproval(false)}>Keep in draft</button></div>}{!approval && <div className="verified"><b>✓ Action approved and queued</b><span>Verification will attach evidence when the tool completes.</span></div>}</div>}{m.run?.error && <div className="offline"><b>PRIVATE BRAIN OFFLINE</b><span>{m.run.error}</span></div>}</div></article>)}
+      {running && <article className="message jaslyn"><div className="message-avatar">✦</div><div className="message-body"><div className="message-meta">Jaslyn<span>Working · concise status only</span></div><div className="thinking"><i/><i/><i/><span>Understanding objective and checking boundaries…</span></div></div></article>}
+    </>}
     <div ref={endRef}/>
    </div>
-   <form className="composer" onSubmit={submit}><button type="button" className="attach">＋</button><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}}} placeholder="Message Jaslyn…" rows={1}/><div className="composer-tools"><span>Private session</span><button type="submit" disabled={!input.trim()||running}>↑</button></div></form>
-   <div className="disclaimer">Jaslyn can reason and plan, but it never invents completed actions. External actions require registered tools, policy checks and verification.</div>
+   <form className="composer" onSubmit={submit}><button type="button" className="attach" onClick={()=>setActive("Tools")}>＋</button><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit()}}} placeholder="Give Jaslyn a command…" rows={1}/><div className="composer-tools"><span>Private session</span><button type="submit" disabled={!input.trim()||running}>↑</button></div></form><div className="disclaimer">Jaslyn never invents completed actions · External actions require registered tools, policy checks, approval, and verification</div>
   </section>
-  <aside className="context-panel"><div className="context-title"><span>SESSION</span><b>PRIVATE</b></div><div className="context-card"><small>AGENT</small><strong>Jaslyn</strong><span>Autonomous intelligence</span></div><div className="context-card"><small>RUNTIME</small><div className="metric"><i/> Waiting for objective</div></div><div className="context-section"><small>CAPABILITIES</small><p>Reasoning</p><p>Planning</p><p>Memory</p><p>Tools</p><p>Verification</p></div><div className="context-section"><small>GOVERNANCE</small><p>Private by default</p><p>Approval boundaries</p><p>Audit trail</p></div></aside>
+  <aside className="context-panel"><div className="context-title"><span>INSPECTOR</span><b>● OPERATIONAL</b></div><div className="context-card"><small>CURRENT OBJECTIVE</small><strong>{active==="Command"?"Prepare a useful outcome":"Browse "+active.toLowerCase()}</strong><span>Private session · owner controlled</span><div className="progress"><i/></div></div><div className="context-card"><small>AUTONOMOUS LOOP</small><div className="mini-loop"><b>Observe</b><span>→</span><b>Plan</b><span>→</span><b className="lit">Act</b><span>→</span><b>Verify</b></div></div><Section title="RUNTIME STATE"><p><i className="dot violet"/> Mode · Autonomous</p><p><i className="dot green"/> Guardrails · Strict</p><p><i className="dot"/> Memory · Scoped</p></Section><Section title="MEMORY CONTEXT"><p>Launch briefing format</p><p>Private by default</p><p>Direct product voice</p><button className="text-link" onClick={()=>setActive("Memory")}>Manage memory →</button></Section><Section title="ACTIVE TOOLS"><p><i className="dot green"/> Browser · read-only</p><p><i className="dot violet"/> Workspace files · read/write</p><p><i className="dot"/> Calendar · not connected</p><button className="text-link" onClick={()=>setActive("Tools")}>View permission scopes →</button></Section><Section title="BACKGROUND JOBS"><div className="job"><i className="dot blue"/><span>Indexing workspace</span><small>42% · running</small></div></Section></aside>
+  {palette&&<div className="palette-backdrop" onClick={()=>setPalette(false)}><div className="palette" onClick={e=>e.stopPropagation()}><div className="palette-search">⌕ <input autoFocus placeholder="Search commands, sessions, memory…"/><kbd>ESC</kbd></div><button onClick={()=>{setPalette(false);setActive("Command")}}>⌘ <span>Start a new command</span><small>⌘ ↵</small></button><button onClick={()=>{setPalette(false);setActive("Memory")}}>◌ <span>Browse memory context</span><small>⌘ M</small></button><button onClick={()=>{setPalette(false);setActive("Automations")}}>◷ <span>Open background jobs</span></button><button onClick={()=>{setPalette(false);setActive("Activity")}}>◍ <span>Review audit activity</span></button></div></div>}
  </main>
 }
