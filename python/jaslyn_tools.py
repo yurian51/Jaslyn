@@ -13,6 +13,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from jaslyn_code import detect as detect_code_language, create_language
+from jaslang import run as run_jaslang
 
 ROOT = Path(os.environ.get("JASLYN_WORKSPACE", os.getcwd())).resolve()
 MEMORY_DB = Path(os.environ.get("JASLYN_MEMORY_DB", ROOT / "data" / "jaslyn_memory.sqlite3")).resolve()
@@ -138,6 +139,8 @@ def main(request):
         return response(True, tool=tool, detection=detect_code_language(args.get("source", ""), args.get("filename", "")))
     if tool == "create_language":
         return response(True, tool=tool, language=create_language(args.get("name", "Jaslyn Language"), args.get("description", "A language designed with Jaslyn"), args.get("keywords"), ROOT / "data" / "languages"))
+    if tool == "run_jaslang":
+        return response(True, tool=tool, result=run_jaslang(str(args.get("source", "")), int(args.get("max_steps", 10000))))
     return response(False, error=f"Python tool '{tool}' is not registered")
 
 

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-type PythonRequest = { tool: "system_snapshot" | "workspace_list" | "text_stats" | "memory_store" | "memory_search" | "memory_list" | "memory_delete" | "api_key_create" | "api_key_list" | "api_key_revoke" | "api_key_verify" | "detect_language" | "create_language"; args?: Record<string, unknown> };
+type PythonRequest = { tool: "system_snapshot" | "workspace_list" | "text_stats" | "memory_store" | "memory_search" | "memory_list" | "memory_delete" | "api_key_create" | "api_key_list" | "api_key_revoke" | "api_key_verify" | "detect_language" | "create_language" | "run_jaslang"; args?: Record<string, unknown> };
 type PythonResponse = { ok: boolean; [key: string]: unknown };
 
 export function runPythonTool(request: PythonRequest): Promise<PythonResponse> {

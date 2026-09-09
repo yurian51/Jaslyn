@@ -3,7 +3,7 @@ import { z } from "zod";
 import { runPythonTool } from "../../../src/bridge/python-runner";
 
 const schema = z.object({
-  tool: z.enum(["system_snapshot", "workspace_list", "text_stats", "memory_store", "memory_search", "memory_list", "memory_delete", "detect_language", "create_language"]),
+  tool: z.enum(["system_snapshot", "workspace_list", "text_stats", "memory_store", "memory_search", "memory_list", "memory_delete", "detect_language", "create_language", "run_jaslang"]),
   args: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -20,6 +20,7 @@ export async function GET() {
       { name: "memory_delete", scope: "persistent-delete", description: "Delete a memory by id." },
       { name: "detect_language", scope: "read-only", description: "Identify a programming or data language from a file or source." },
       { name: "create_language", scope: "workspace-write", description: "Generate an experimental Jaslyn language package." },
+      { name: "run_jaslang", scope: "sandboxed-execution", description: "Execute JasLang with line, output, and step limits." },
     ],
   });
 }
