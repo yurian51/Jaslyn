@@ -1,9 +1,10 @@
 {
   "compilerOptions":{
     "target":"ES2024","module":"NodeNext","moduleResolution":"NodeNext",
-    "rootDir":"src","outDir":"dist","strict":true,"noUncheckedIndexedAccess":true,
-    "exactOptionalPropertyTypes":true,"verbatimModuleSyntax":true,
-    "skipLibCheck":true,"declaration":true,"sourceMap":true
+    "strict":true,"noUncheckedIndexedAccess":true,"exactOptionalPropertyTypes":true,
+    "verbatimModuleSyntax":true,"skipLibCheck":true,"noEmit":true,
+    "plugins":[{"name":"next"}]
   },
-  "include":["src/**/*.ts"]
+  "include":["next-env.d.ts","**/*.ts","**/*.tsx",".next/types/**/*.ts"],
+  "exclude":["node_modules"]
 }
