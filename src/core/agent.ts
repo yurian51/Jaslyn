@@ -39,6 +39,6 @@ export class JaslynAgent {
     const verified: boolean = "success" in verification ? Boolean(verification.success) : Boolean(verification.verified);
     const success=verified&&outcome.verified;
     this.memory.put({kind:"episodic",key:`run:${goal.id}`,value:{instruction,status:success?"completed":"unverified"},confidence:1});
-    return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results,verification,outcome,audit:this.audit.append({actor:"jaslyn",action:instruction,result:success?"verified":"unverified"})};
+    return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results,verification: verification ?? { success:false, completed:0, failed:0, blocked:0, details:"Approval required before external side effects." },outcome,audit:this.audit.append({actor:"jaslyn",action:instruction,result:success?"verified":"unverified"})};
   }
 }
