@@ -34,9 +34,9 @@ export class JaslynAgent {
     if(!policy.allowed) return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results:[],verification:{verified:false,reason:policy.reason},audit:this.audit.append({actor:"jaslyn",action:instruction,result:"blocked"})};
     const toolContext:ToolContext={runId:crypto.randomUUID(),agentId:"jaslyn-core"};
     const results=policy.requiresApproval?[]:await this.executor.execute(plan,toolContext);
-    const verification=policy.requiresApproval?{verified:false,reason:"Approval required before external side effects.",evidence:[]}:this.verifier.verify(plan,results);
+    const verification = policy.requiresApproval ? { success:false, verified:false, reason:"Approval required before external side effects.", evidence:[] } : this.verifier.verify(plan,results);
     const outcome=this.outcomeVerifier.verify(instruction,results);
-    const verified: boolean = "success" in verification ? Boolean(verification.success) : "verified" in verification ? Boolean(verification.verified) : false;
+    const verified: boolean = "success" in verification ? Boolean(verification.success) : Boolean(verification.verified);
     const success=verified&&outcome.verified;
     this.memory.put({kind:"episodic",key:`run:${goal.id}`,value:{instruction,status:success?"completed":"unverified"},confidence:1});
     return {goal,mind:{objectives:mindObjectives,decision,selfCheck:check},context,plan,results,verification,outcome,audit:this.audit.append({actor:"jaslyn",action:instruction,result:success?"verified":"unverified"})};
