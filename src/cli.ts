@@ -11,7 +11,7 @@ const registry = new ToolRegistry();
 registry.register(echoTool);
 
 const agent = new JaslynAgent(
-  new Planner(new DeterministicProvider()),
+  new Planner(new JaslynProvider()),
   new Executor(registry, new DefaultPolicyEngine()),
   new VerificationEngine()
 );
