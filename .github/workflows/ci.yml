@@ -34,3 +34,5 @@ jobs:
         run: npm run build
       - name: Tests
         run: npm test
+      - name: Dependency-free runtime selftest
+        run: npm run benchmark:selftest
