@@ -1,2 +1,0 @@
-import type {ToolDefinition} from "./types.js";
-export class ActionRegistry{private tools=new Map<string,ToolDefinition>();register(tool:ToolDefinition){if(this.tools.has(tool.name))throw new Error("Tool already registered");this.tools.set(tool.name,tool);}get(name:string){return this.tools.get(name);}list(){return [...this.tools.values()];}}
