@@ -2,10 +2,13 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import crypto from "node:crypto";
 
+const DEFAULT_TTL_MS = 15 * 60 * 1000;
+
 export class JsonApprovalStore {
-  constructor(filePath = ".jaslyn/approvals.json", { maxRecords = 500 } = {}) {
+  constructor(filePath = ".jaslyn/approvals.json", { maxRecords = 500, ttlMs = DEFAULT_TTL_MS } = {}) {
     this.filePath = filePath;
     this.maxRecords = Math.max(20, Number(maxRecords) || 500);
+    this.ttlMs = Math.max(30_000, Number(ttlMs) || DEFAULT_TTL_MS);
     this.records = [];
   }
 
@@ -18,15 +21,21 @@ export class JsonApprovalStore {
       if (error?.code !== "ENOENT") throw error;
       this.records = [];
     }
+    await this.#expire();
     return this;
   }
 
   get(id) {
-    return this.records.find((record) => record.id === id) || null;
+    const record = this.records.find((candidate) => candidate.id === id) || null;
+    if (record && record.status === "pending" && this.#isExpired(record)) return { ...record, status: "expired" };
+    return record;
   }
 
   list({ status, limit = 50 } = {}) {
-    const filtered = status ? this.records.filter((record) => record.status === status) : this.records;
+    const filtered = this.records.filter((record) => {
+      if (record.status === "pending" && this.#isExpired(record)) return status === "expired";
+      return !status || record.status === status;
+    });
     return filtered.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse();
   }
 
@@ -40,7 +49,9 @@ export class JsonApprovalStore {
       reason: String(reason || "Approval required."),
       status: "pending",
       createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + this.ttlMs).toISOString(),
       decidedAt: null,
+      consumedAt: null,
     };
     this.records.push(record);
     this.#trim();
@@ -49,7 +60,8 @@ export class JsonApprovalStore {
   }
 
   async decide(id, decision) {
-    const record = this.get(id);
+    await this.#expire();
+    const record = this.records.find((candidate) => candidate.id === id);
     if (!record) throw new Error("Approval request not found.");
     if (record.status !== "pending") throw new Error(`Approval request is already ${record.status}.`);
     if (decision !== "approved" && decision !== "rejected") throw new Error("Decision must be approved or rejected.");
@@ -57,6 +69,34 @@ export class JsonApprovalStore {
     record.decidedAt = new Date().toISOString();
     await this.#persist();
     return record;
+  }
+
+  async claimApproved(id) {
+    await this.#expire();
+    const record = this.records.find((candidate) => candidate.id === id);
+    if (!record) throw new Error("Approval request not found.");
+    if (record.status !== "approved") throw new Error(`Approval request is ${record.status}, not approved.`);
+    record.status = "consumed";
+    record.consumedAt = new Date().toISOString();
+    await this.#persist();
+    return cloneSafe(record);
+  }
+
+  async #expire() {
+    let changed = false;
+    for (const record of this.records) {
+      if (record.status === "pending" && this.#isExpired(record)) {
+        record.status = "expired";
+        record.decidedAt = new Date().toISOString();
+        changed = true;
+      }
+    }
+    if (changed) await this.#persist();
+  }
+
+  #isExpired(record) {
+    const expiry = Date.parse(record.expiresAt || record.createdAt || "");
+    return Number.isFinite(expiry) && expiry <= Date.now();
   }
 
   #trim() {
