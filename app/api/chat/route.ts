@@ -5,6 +5,8 @@ import { createJaslynBenchmarkRuntime } from "../../../src/benchmark/index.mjs";
 
 export const dynamic = "force-dynamic";
 
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+
 const schema = z.object({
   messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string().max(20000) })).min(1).max(100),
   temperature: z.number().min(0).max(1).default(0.2),
@@ -16,23 +18,27 @@ const JASLYN_SYSTEM = `You are Jaslyn, an independent general-purpose AI agent. 
 
 export async function POST(request: Request) {
   const requestStartedAt = Date.now();
+  const requestId = request.headers.get("x-request-id")?.slice(0, 128) || crypto.randomUUID();
+  const headers = { "cache-control": "no-store", "x-jaslyn-request-id": requestId };
   try {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > MAX_REQUEST_BYTES) return NextResponse.json({ error: "Request payload is too large.", requestId }, { status: 413, headers });
     if (process.env.JASLYN_REQUIRE_API_KEY === "1") {
       const supplied = request.headers.get("x-jaslyn-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
       const check = await runPythonTool({ tool: "api_key_verify", args: { key: supplied || "" } });
-      if (!check.valid) return NextResponse.json({ error: "A valid Jaslyn API key is required." }, { status: 401 });
+      if (!check.valid) return NextResponse.json({ error: "A valid Jaslyn API key is required.", requestId }, { status: 401, headers });
     }
     const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: "Valid messages are required." }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ error: "Valid messages are required.", requestId }, { status: 400, headers });
     const lastUser = [...parsed.data.messages].reverse().find((message) => message.role === "user")?.content;
-    if (!lastUser) return NextResponse.json({ error: "A user message is required." }, { status: 400 });
-    if (!process.env.JASLYN_INFERENCE_URL) return NextResponse.json({ error: "Configure JASLYN_INFERENCE_URL for Jaslyn's self-hosted model brain." }, { status: 503 });
+    if (!lastUser) return NextResponse.json({ error: "A user message is required.", requestId }, { status: 400, headers });
+    if (!process.env.JASLYN_INFERENCE_URL) return NextResponse.json({ error: "Configure JASLYN_INFERENCE_URL for Jaslyn's self-hosted model brain.", requestId }, { status: 503, headers });
 
     const runtime = await createJaslynBenchmarkRuntime({ provider: { id: "jaslyn-local", model: parsed.data.model || process.env.JASLYN_MODEL || "jaslyn" }, maxIterations: 8 }).initialize();
-    const context = { system: JASLYN_SYSTEM, conversation: parsed.data.messages, temperature: parsed.data.temperature };
+    const context = { system: JASLYN_SYSTEM, conversation: parsed.data.messages, temperature: parsed.data.temperature, requestId };
     const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout });
 
-    if (result.mode === "fanout") return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, outcome: result.outcome, events: result.events, latencyMs: Date.now() - requestStartedAt }, { headers: { "cache-control": "no-store" } });
+    if (result.mode === "fanout") return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, outcome: result.outcome, events: result.events, requestId, latencyMs: Date.now() - requestStartedAt }, { headers });
 
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
     const run = {
@@ -47,8 +53,8 @@ export async function POST(request: Request) {
       },
       toolResults: result.toolResults.map((tool) => ({ id: tool.id, tool: tool.tool, ok: tool.ok, blocked: Boolean(tool.blocked), error: tool.error || null, approvalId: tool.approvalId || null })),
     };
-    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, approvals: result.approvals || [], outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, latencyMs: Date.now() - requestStartedAt }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, approvals: result.approvals || [], outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, requestId, latencyMs: Date.now() - requestStartedAt }, { headers });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed.", latencyMs: Date.now() - requestStartedAt }, { status: 500, headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed.", requestId, latencyMs: Date.now() - requestStartedAt }, { status: 500, headers });
   }
 }
