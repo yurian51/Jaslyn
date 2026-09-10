@@ -8,6 +8,7 @@ const schema = z.object({
   temperature: z.number().min(0).max(1).default(0.2),
   model: z.string().min(1).max(120).optional(),
   fanout: z.boolean().default(false),
+  approve: z.boolean().default(false),
 });
 
 const JASLYN_SYSTEM = `You are Jaslyn, an independent general-purpose AI agent. You can help with conversation, analysis, writing, coding, debugging, planning, research, and structured work. You are not GPT, Claude, Gemini, Copilot, Manus, or a clone of another product. Be direct, accurate, and useful. Never claim an external action happened without execution evidence. Keep hidden chain-of-thought private; provide concise reasoning summaries, plans, assumptions, and verifiable results.`;
@@ -32,14 +33,31 @@ export async function POST(request: Request) {
     }).initialize();
 
     const context = { system: JASLYN_SYSTEM, conversation: parsed.data.messages, temperature: parsed.data.temperature };
-    const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout });
+    const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout, approve: parsed.data.approve });
 
     if (result.mode === "fanout") {
-      return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, events: result.events });
+      return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, outcome: result.outcome, events: result.events });
     }
 
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
-    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, events: result.events });
+    const run = {
+      goal: result.goal.instruction,
+      status: result.status,
+      reasoning: result.reasoning?.summary || "",
+      intent: result.reasoning?.intent || "",
+      decision: result.reasoning?.decision || "",
+      needsApproval: Boolean(result.reasoning?.needsApproval),
+      approvalReason: result.reasoning?.approvalReason || "",
+      steps: result.steps.map((step) => step.description),
+      execution: {
+        events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") ? "blocked" : "completed" })),
+        completed: result.outcome.completed,
+        verified: result.verified ? 1 : 0,
+        blocked: result.outcome.blocked,
+        maxSteps: 100,
+      },
+    };
+    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, status: result.status, events: result.events });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed." }, { status: 500 });
   }
