@@ -24,7 +24,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - name: Runtime versions
         run: node --version && npm --version
       - name: Install dependencies
