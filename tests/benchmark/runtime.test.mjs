@@ -75,7 +75,7 @@ test("runtime suppresses duplicate tool side effects within one run", async () =
 test("runtime marks timed-out tools as failed and persists the result", async () => {
   const { dir, runtime } = await tempRuntime({
     providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "attempted", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "slow", input: {} }] }) }],
-    tools: [{ name: "slow", description: "Slow operation", execute: async () => new Promise((resolve) => setTimeout(() => resolve("late"), 50)) }],
+    tools: [{ name: "slow", description: "Slow operation", execute: async () => new Promise((resolve) => setTimeout(() => resolve("late"), 500)) }],
     toolTimeoutMs: 250, maxIterations: 1,
   });
   try { const result = await runtime.run("run timeout test", { providerId: "local" }); assert.equal(result.status, "failed"); assert.equal(result.outcome.failed, 1); assert.equal(runtime.getRun(result.goal.id).status, "failed"); }
