@@ -47,3 +47,19 @@ test("approval store expires stale pending requests", async () => {
   assert.equal(reloaded.get(pending.id).status, "expired");
   await assert.rejects(() => reloaded.decide(pending.id, "approved"), /already expired/);
 });
+
+test("approval store serializes concurrent claims so only one execution can win", async () => {
+  const filePath = file();
+  const first = await new JsonApprovalStore(filePath).load();
+  const pending = await first.create({ runId: "run-4", tool: "workspace.write", input: { path: "safe.txt", content: "one" }, reason: "Write to workspace." });
+  await first.decide(pending.id, "approved");
+
+  const a = new JsonApprovalStore(filePath);
+  const b = new JsonApprovalStore(filePath);
+  await Promise.all([a.load(), b.load()]);
+  const results = await Promise.allSettled([a.claimApproved(pending.id), b.claimApproved(pending.id)]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  const persisted = JSON.parse(await readFile(filePath, "utf8"));
+  assert.equal(persisted.find((record) => record.id === pending.id).status, "consumed");
+});
