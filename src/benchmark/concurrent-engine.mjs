@@ -20,7 +20,8 @@ export class ConcurrentEngine {
         }
         const started = Date.now();
         try {
-          const value = await withTimeout(Promise.resolve(provider.reason(request)), this.timeoutMs);
+          const controller = new AbortController();
+          const value = await withTimeout(Promise.resolve(provider.reason({ ...request, signal: controller.signal })), this.timeoutMs, controller);
           results.push({ provider: id, model: provider.model, ok: true, latencyMs: Date.now() - started, result: value });
         } catch (error) {
           results.push({ provider: id, model: provider.model, ok: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) });
@@ -37,9 +38,10 @@ export class ConcurrentEngine {
   }
 }
 
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, controller) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Provider timeout after ${timeoutMs}ms`)), timeoutMs)),
-  ]);
+    new Promise((_, reject) => { timer = setTimeout(() => { controller?.abort(); reject(new Error(`Provider timeout after ${timeoutMs}ms`)); }, timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
 }
