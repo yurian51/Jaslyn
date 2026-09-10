@@ -1,6 +1,6 @@
 {
   "name": "jaslyn",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Jaslyn, an independent autonomous AI agent runtime and control surface.",
   "type": "module",
