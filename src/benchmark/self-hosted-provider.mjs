@@ -7,11 +7,11 @@ export function createSelfHostedProvider({ id = "jaslyn-local", baseUrl = proces
     id,
     name: "Jaslyn Self-Hosted Brain",
     model,
-    health: async () => {
-      const response = await fetch(`${normalized}/models`, { cache: "no-store" });
+    health: async ({ signal } = {}) => {
+      const response = await fetch(`${normalized}/models`, { cache: "no-store", signal });
       if (!response.ok) throw new Error(`Inference health returned ${response.status}`);
     },
-    reason: async ({ instruction, context = {} }) => {
+    reason: async ({ instruction, context = {}, signal }) => {
       const system = [
         "You are Jaslyn, an independent autonomous AI agent.",
         "Follow: Understand -> Context -> Plan -> Policy -> Approve -> Execute -> Observe -> Verify -> Recover -> Remember.",
@@ -33,6 +33,7 @@ export function createSelfHostedProvider({ id = "jaslyn-local", baseUrl = proces
           response_format: { type: "json_object" },
         }),
         cache: "no-store",
+        signal,
       });
       if (!response.ok) throw new Error(`Jaslyn inference returned ${response.status}: ${(await response.text()).slice(0, 400)}`);
       const payload = await response.json();
