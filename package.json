@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test",
+    "language:audit": "node scripts/language-audit.mjs",
     "benchmark:health": "node scripts/benchmark-health.mjs",
     "benchmark:test": "node --test tests/benchmark/*.test.mjs",
     "benchmark:selftest": "node scripts/benchmark-selftest.mjs",
