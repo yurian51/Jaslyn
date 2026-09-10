@@ -13,9 +13,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const runtime = await createJaslynBenchmarkRuntime().initialize();
     const approval = await runtime.approvalStore.decide(id, decision);
-    if (decision === "rejected") return NextResponse.json({ approval, executed: false }, { headers: { "cache-control": "no-store" } });
+    if (decision === "rejected") return NextResponse.json({ approval, executed: false, execution: null }, { headers: { "cache-control": "no-store" } });
 
     const execution = await runtime.executeApprovedApproval(id);
+    if (!execution.ok) {
+      return NextResponse.json({ approval: execution.approval, executed: false, execution, error: execution.error || "Approved action failed." }, { status: 502, headers: { "cache-control": "no-store" } });
+    }
     return NextResponse.json({ approval: execution.approval, executed: true, execution }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to decide approval.";
