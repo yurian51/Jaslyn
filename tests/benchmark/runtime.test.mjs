@@ -75,6 +75,20 @@ test("runtime creates a durable exact-action approval and executes only that sto
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test("runtime cannot bypass a protected tool with a generic approve flag", async () => {
+  let calls = 0;
+  const { dir, runtime } = await tempRuntime({
+    providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "approval needed", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "danger", input: { action: "delete" } }] }) }],
+    tools: [{ name: "danger", description: "Protected operation", requiresApproval: true, execute: async () => { calls += 1; return "should not run"; } }],
+  });
+  try {
+    const result = await runtime.run("protected operation", { providerId: "local", approve: true });
+    assert.equal(calls, 0);
+    assert.equal(result.outcome.blocked, 1);
+    assert.equal(result.approvals.length, 1);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test("runtime blocks approval-required tools without approval", async () => {
   const { dir, runtime } = await tempRuntime({
     providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "approval needed", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "danger", input: {} }] }) }],
