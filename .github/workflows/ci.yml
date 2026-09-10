@@ -34,5 +34,7 @@ jobs:
         run: npm run build
       - name: Tests
         run: npm test
+      - name: Benchmark security regressions
+        run: npm run benchmark:security
       - name: Dependency-free runtime selftest
         run: npm run benchmark:selftest
