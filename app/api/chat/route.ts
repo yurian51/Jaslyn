@@ -14,6 +14,7 @@ const schema = z.object({
 const JASLYN_SYSTEM = `You are Jaslyn, an independent general-purpose AI agent. You can help with conversation, analysis, writing, coding, debugging, planning, research, and structured work. You are not GPT, Claude, Gemini, Copilot, Manus, or a clone of another product. Be direct, accurate, and useful. Never claim an external action happened without execution evidence. Keep hidden chain-of-thought private; provide concise reasoning summaries, plans, assumptions, and verifiable results.`;
 
 export async function POST(request: Request) {
+  const requestStartedAt = Date.now();
   try {
     if (process.env.JASLYN_REQUIRE_API_KEY === "1") {
       const supplied = request.headers.get("x-jaslyn-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -36,12 +37,14 @@ export async function POST(request: Request) {
     const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout, approve: parsed.data.approve });
 
     if (result.mode === "fanout") {
-      return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, outcome: result.outcome, events: result.events });
+      return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, outcome: result.outcome, events: result.events, latencyMs: Date.now() - requestStartedAt });
     }
 
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
     const run = {
+      id: result.goal.id,
       goal: result.goal.instruction,
+      provider: result.provider,
       status: result.status,
       reasoning: result.reasoning?.summary || "",
       intent: result.reasoning?.intent || "",
@@ -50,15 +53,15 @@ export async function POST(request: Request) {
       approvalReason: result.reasoning?.approvalReason || "",
       steps: result.steps.map((step) => step.description),
       execution: {
-        events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") ? "blocked" : "completed" })),
+        events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") || event.type.includes("failed") ? "blocked" : "completed" })),
         completed: result.outcome.completed,
         verified: result.verified ? 1 : 0,
         blocked: result.outcome.blocked,
         maxSteps: 100,
       },
     };
-    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, status: result.status, events: result.events });
+    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, latencyMs: Date.now() - requestStartedAt });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed." }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed.", latencyMs: Date.now() - requestStartedAt }, { status: 500 });
   }
 }
