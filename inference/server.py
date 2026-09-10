@@ -1,44 +1,60 @@
-import json
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from functools import lru_cache
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from huggingface_hub import hf_hub_download
+from llama_cpp import Llama
 
 MODEL_NAME = os.getenv("JASLYN_MODEL", "jaslyn")
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+MODEL_REPO = os.getenv("JASLYN_MODEL_REPO", "bartowski/SmolLM2-135M-Instruct-GGUF")
+MODEL_FILE = os.getenv("JASLYN_MODEL_FILE", "SmolLM2-135M-Instruct-Q4_K_M.gguf")
+MODEL_DIR = os.getenv("JASLYN_MODEL_DIR", "/tmp/jaslyn-model")
+N_CTX = max(512, min(4096, int(os.getenv("JASLYN_CONTEXT", "2048"))))
+N_THREADS = max(1, int(os.getenv("JASLYN_THREADS", str(os.cpu_count() or 2))))
+MAX_TOKENS = max(32, min(1024, int(os.getenv("JASLYN_MAX_TOKENS", "512"))))
 
-class Handler(BaseHTTPRequestHandler):
-    def _send(self, status, payload):
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+app = FastAPI(title="Jaslyn Self-Hosted Inference", version="0.1.0")
 
-    def do_GET(self):
-        if self.path == "/health":
-            return self._send(200, {"status": "ok", "model": MODEL_NAME, "inference": "not_loaded"})
-        if self.path == "/v1/models":
-            return self._send(200, {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "jaslyn"}]})
-        return self._send(404, {"error": "not_found"})
+@lru_cache(maxsize=1)
+def model():
+    path = hf_hub_download(repo_id=MODEL_REPO, filename=MODEL_FILE, local_dir=MODEL_DIR)
+    return Llama(model_path=path, n_ctx=N_CTX, n_threads=N_THREADS, verbose=False)
 
-    def do_POST(self):
-        if self.path != "/v1/chat/completions":
-            return self._send(404, {"error": "not_found"})
-        length = int(self.headers.get("Content-Length", "0"))
-        if length > 2 * 1024 * 1024:
-            return self._send(413, {"error": "request_too_large"})
-        try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
-            messages = payload.get("messages") or []
-            user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-            return self._send(503, {"error": {"message": "Jaslyn inference model is not loaded yet.", "type": "model_unavailable", "model": MODEL_NAME, "received": bool(user)}})
-        except Exception:
-            return self._send(400, {"error": "invalid_json"})
+def messages_to_prompt(messages):
+    return "\n".join(f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages)
 
-    def log_message(self, format, *args):
-        print(format % args, flush=True)
+@app.get("/health")
+def health():
+    try:
+        model()
+        return {"status": "ok", "model": MODEL_NAME, "inference": "ready"}
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"status": "degraded", "model": MODEL_NAME, "inference": "unavailable", "error": str(exc)})
 
-if __name__ == "__main__":
-    print(f"Jaslyn inference service listening on {HOST}:{PORT}", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+@app.get("/v1/models")
+def models():
+    return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "jaslyn"}]}
+
+@app.post("/v1/chat/completions")
+def chat(payload: dict):
+    messages = payload.get("messages") or []
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+    prompt = messages_to_prompt(messages)
+    try:
+        result = model().create_completion(
+            prompt=prompt,
+            max_tokens=min(MAX_TOKENS, int(payload.get("max_tokens", MAX_TOKENS))),
+            temperature=float(payload.get("temperature", 0.2)),
+            stop=["USER:", "SYSTEM:"],
+        )
+        text = result["choices"][0]["text"].strip()
+        return {
+            "id": "jaslyn-local",
+            "object": "chat.completion",
+            "model": MODEL_NAME,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": result["choices"][0].get("finish_reason", "stop")}],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Inference failed: {exc}") from exc
