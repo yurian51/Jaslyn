@@ -13,12 +13,14 @@ export async function GET() {
       capabilities: {
         persistentMemory: true,
         persistentRunHistory: true,
+        persistentApprovals: true,
         concurrentFanout: true,
         providerFailover: true,
         providerHealthChecks: true,
         cancellableExecution: true,
         approvalGates: true,
         verifiedToolExecution: true,
+        oneTimeApprovalReplayProtection: true,
       },
       checkedAt: new Date().toISOString(),
     }, { headers: { "cache-control": "no-store" } });
