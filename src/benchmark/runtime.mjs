@@ -9,7 +9,7 @@ export class BenchmarkRuntime {
     for (const provider of providers) this.registry.register(provider);
     this.tools = new Map(tools.map((tool) => [tool.name, tool]));
     this.memory = memory;
-    this.policy = { approvalRequired: new Set(policy.approvalRequired || []), deny: new Set(policy.deny || []), ...policy };
+    this.policy = { approvalRequired: new Set(policy.approvalRequired || []), deny: new Set(policy.deny || []) };
     this.maxIterations = Math.max(1, Math.min(32, Number(maxIterations) || 8));
     this.events = [];
   }
@@ -48,7 +48,13 @@ export class BenchmarkRuntime {
       steps.push(...finalReasoning.proposedSteps.map((description) => ({ id: crypto.randomUUID(), description, iteration })));
       this.#emit("reasoning.completed", { goalId: goal.id, iteration, needsApproval: finalReasoning.needsApproval });
 
-      const calls = [...(finalReasoning.toolCalls || []), ...parseToolCalls(finalReasoning.raw || "")];
+      if (finalReasoning.needsApproval && !approve && !(finalReasoning.toolCalls?.length || parseToolCalls(finalReasoning.raw || "").length)) {
+        toolResults.push({ id: crypto.randomUUID(), tool: "approval", ok: false, blocked: true, error: finalReasoning.approvalReason || "Approval required" });
+        this.#emit("run.blocked", { goalId: goal.id, reason: finalReasoning.approvalReason || "Approval required" });
+        break;
+      }
+
+      const calls = dedupeCalls([...(finalReasoning.toolCalls || []), ...parseToolCalls(finalReasoning.raw || "")]);
       if (!calls.length) break;
 
       for (const call of calls) {
@@ -70,17 +76,16 @@ export class BenchmarkRuntime {
           const result = { id: call.id, tool: call.name, ok: true, output: value };
           toolResults.push(result);
           this.#emit("tool.completed", { id: call.id, tool: call.name });
-          currentContext = { ...currentContext, lastToolResult: result };
         } catch (error) {
           const result = { id: call.id, tool: call.name, ok: false, error: error instanceof Error ? error.message : String(error) };
           toolResults.push(result);
           this.#emit("tool.failed", result);
-          currentContext = { ...currentContext, lastToolResult: result };
         }
+        currentContext = { ...currentContext, toolResults: toolResults.slice(-12) };
       }
     }
 
-    const verified = verifyOutcome(finalReasoning, toolResults);
+    const verified = verifyOutcome(finalReasoning, toolResults, steps);
     const outcome = { verified, completed: toolResults.filter((r) => r.ok).length, failed: toolResults.filter((r) => !r.ok && !r.blocked).length, blocked: toolResults.filter((r) => r.blocked).length };
     await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { provider: provider.id, verified, outcome, steps: steps.length } });
     this.#emit("run.verified", { goalId: goal.id, ...outcome });
@@ -105,21 +110,22 @@ export class BenchmarkRuntime {
 
 function normalizeReasoning(value) {
   if (!value || typeof value !== "object") return { summary: String(value || ""), proposedSteps: [], needsApproval: false, approvalReason: "", toolCalls: [], raw: String(value || "") };
-  return {
-    summary: String(value.summary || value.content || ""),
-    proposedSteps: Array.isArray(value.proposedSteps) ? value.proposedSteps.map(String) : [],
-    intent: String(value.intent || ""),
-    decision: String(value.decision || ""),
-    needsApproval: Boolean(value.needsApproval),
-    approvalReason: String(value.approvalReason || ""),
-    toolCalls: Array.isArray(value.toolCalls) ? value.toolCalls : [],
-    raw: typeof value.raw === "string" ? value.raw : "",
-  };
+  return { summary: String(value.summary || value.content || ""), proposedSteps: Array.isArray(value.proposedSteps) ? value.proposedSteps.map(String) : [], intent: String(value.intent || ""), decision: String(value.decision || ""), needsApproval: Boolean(value.needsApproval), approvalReason: String(value.approvalReason || ""), toolCalls: Array.isArray(value.toolCalls) ? value.toolCalls : [], raw: typeof value.raw === "string" ? value.raw : "" };
 }
 
-function verifyOutcome(reasoning, toolResults) {
+function dedupeCalls(calls) {
+  const seen = new Set();
+  return calls.filter((call) => {
+    const key = `${call.name}:${JSON.stringify(call.input || {})}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function verifyOutcome(reasoning, toolResults, steps) {
   if (!reasoning) return false;
   if (reasoning.needsApproval && toolResults.some((r) => r.blocked)) return false;
   if (toolResults.some((r) => !r.ok && !r.blocked)) return false;
-  return Boolean(reasoning.summary || reasoning.decision || reasoning.proposedSteps.length);
+  return Boolean(reasoning.summary || reasoning.decision || steps.length);
 }
