@@ -39,15 +39,16 @@ export async function POST(request: Request) {
     const run = {
       id: result.goal.id, goal: result.goal.instruction, provider: result.provider, status: result.status,
       reasoning: result.reasoning?.summary || "", intent: result.reasoning?.intent || "", decision: result.reasoning?.decision || "",
-      needsApproval: Boolean(result.reasoning?.needsApproval), approvalReason: result.reasoning?.approvalReason || "",
+      needsApproval: Boolean(result.reasoning?.needsApproval || result.approvals?.length), approvalReason: result.reasoning?.approvalReason || result.approvals?.[0]?.reason || "",
+      approvals: (result.approvals || []).map((item) => ({ id: item.id, tool: item.tool, reason: item.reason, status: item.status, createdAt: item.createdAt, expiresAt: item.expiresAt })),
       steps: result.steps.map((step) => step.description),
       execution: {
         events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") || event.type.includes("failed") ? "blocked" : "completed" })),
         completed: result.outcome.completed, verified: result.verified ? 1 : 0, blocked: result.outcome.blocked, maxSteps: 100,
       },
-      toolResults: result.toolResults.map((tool) => ({ id: tool.id, tool: tool.tool, ok: tool.ok, blocked: Boolean(tool.blocked), error: tool.error || null })),
+      toolResults: result.toolResults.map((tool) => ({ id: tool.id, tool: tool.tool, ok: tool.ok, blocked: Boolean(tool.blocked), error: tool.error || null, approvalId: tool.approvalId || null })),
     };
-    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, latencyMs: Date.now() - requestStartedAt }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, approvals: result.approvals || [], outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, latencyMs: Date.now() - requestStartedAt }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed.", latencyMs: Date.now() - requestStartedAt }, { status: 500, headers: { "cache-control": "no-store" } });
   }
