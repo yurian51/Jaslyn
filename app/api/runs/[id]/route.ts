@@ -1,0 +1,17 @@
+import { NextResponse } from "next/server";
+import { createJaslynBenchmarkRuntime } from "../../../../src/benchmark/index.mjs";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    if (!id || id.length > 128) return NextResponse.json({ error: "A valid Jaslyn run id is required." }, { status: 400 });
+    const runtime = await createJaslynBenchmarkRuntime().initialize();
+    const run = runtime.getRun(id);
+    if (!run) return NextResponse.json({ error: "Jaslyn run not found." }, { status: 404 });
+    return NextResponse.json({ run }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to read Jaslyn run." }, { status: 500, headers: { "cache-control": "no-store" } });
+  }
+}
