@@ -24,10 +24,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Runtime versions
         run: node --version && npm --version
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: JavaScript boundary audit
+        run: npm run language:audit
       - name: JavaScript syntax validation
         run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js
       - name: Build
