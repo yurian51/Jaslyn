@@ -7,6 +7,7 @@ import { JsonApprovalStore } from "./approval-store.mjs";
 export function createJaslynBenchmarkRuntime(options = {}) {
   const memory = options.memory || new JsonMemory();
   const runStore = options.runStore || new JsonRunStore();
+  const approvalStore = options.approvalStore || new JsonApprovalStore();
   const models = options.models || String(process.env.JASLYN_MODELS || process.env.JASLYN_MODEL || "jaslyn").split(",").map((x) => x.trim()).filter(Boolean);
   const providers = models.map((model, index) => createSelfHostedProvider({
     ...(options.provider || {}),
@@ -14,7 +15,7 @@ export function createJaslynBenchmarkRuntime(options = {}) {
     model,
   }));
   const tools = options.tools || createBuiltinTools(memory);
-  return new BenchmarkRuntime({ providers, tools, policy: options.policy || {}, maxIterations: options.maxIterations || 8, toolTimeoutMs: options.toolTimeoutMs, providerTimeoutMs: options.providerTimeoutMs, maxContextChars: options.maxContextChars, memory, runStore });
+  return new BenchmarkRuntime({ providers, tools, policy: options.policy || {}, maxIterations: options.maxIterations || 8, toolTimeoutMs: options.toolTimeoutMs, providerTimeoutMs: options.providerTimeoutMs, maxContextChars: options.maxContextChars, memory, runStore, approvalStore });
 }
 
 function createBuiltinTools(memory) {
