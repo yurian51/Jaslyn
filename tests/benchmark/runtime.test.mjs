@@ -16,7 +16,7 @@ test("provider registry registers and reports providers", async () => {
   assert.deepEqual((await registry.health()).map((x) => x.ok), [true, true]);
 });
 
-test("concurrent engine fans out without serial waits", async () => {
+test("concurrent engine fans out across providers", async () => {
   const registry = new ProviderRegistry();
   registry.register(provider("a", "A"));
   registry.register(provider("b", "B"));
@@ -36,13 +36,14 @@ test("tool protocol is deterministic and malformed calls are ignored", () => {
 test("runtime executes an authorized tool and remembers the outcome", async () => {
   const memory = new JsonMemory("/tmp/jaslyn-benchmark-test-memory.json");
   const runtime = new BenchmarkRuntime({
-    providers: [provider("local", "done")],
+    providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "tool executed", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "echo", input: { ok: true } }] }) }],
     memory,
     tools: [{ name: "echo", description: "Echo", execute: async (input) => input }],
+    maxIterations: 2,
   });
   await runtime.initialize();
-  const result = await runtime.run("build a test", { providerId: "local" });
+  const result = await runtime.run("run a safe tool", { providerId: "local" });
   assert.equal(result.verified, true);
-  assert.equal(result.outcome.completed, 0);
-  assert.ok(memory.search("build a test").length > 0);
+  assert.equal(result.outcome.completed, 1);
+  assert.ok(memory.search("run a safe tool").length > 0);
 });
