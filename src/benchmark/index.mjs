@@ -2,6 +2,7 @@ import { BenchmarkRuntime } from "./runtime.mjs";
 import { createSelfHostedProvider } from "./self-hosted-provider.mjs";
 import { JsonMemory } from "./memory.mjs";
 import { JsonRunStore } from "./run-store.mjs";
+import { JsonApprovalStore } from "./approval-store.mjs";
 
 export function createJaslynBenchmarkRuntime(options = {}) {
   const memory = options.memory || new JsonMemory();
@@ -13,7 +14,7 @@ export function createJaslynBenchmarkRuntime(options = {}) {
     model,
   }));
   const tools = options.tools || createBuiltinTools(memory);
-  return new BenchmarkRuntime({ providers, tools, policy: options.policy || {}, maxIterations: options.maxIterations || 8, toolTimeoutMs: options.toolTimeoutMs, maxContextChars: options.maxContextChars, memory, runStore });
+  return new BenchmarkRuntime({ providers, tools, policy: options.policy || {}, maxIterations: options.maxIterations || 8, toolTimeoutMs: options.toolTimeoutMs, providerTimeoutMs: options.providerTimeoutMs, maxContextChars: options.maxContextChars, memory, runStore });
 }
 
 function createBuiltinTools(memory) {
@@ -30,4 +31,5 @@ export { ProviderRegistry } from "./provider-registry.mjs";
 export { ConcurrentEngine } from "./concurrent-engine.mjs";
 export { JsonMemory } from "./memory.mjs";
 export { JsonRunStore } from "./run-store.mjs";
+export { JsonApprovalStore } from "./approval-store.mjs";
 export { buildToolPrompt, parseToolCalls, stripToolCalls } from "./tool-protocol.mjs";
