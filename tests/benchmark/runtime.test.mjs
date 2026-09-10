@@ -7,6 +7,7 @@ import { ProviderRegistry } from "../../src/benchmark/provider-registry.mjs";
 import { ConcurrentEngine } from "../../src/benchmark/concurrent-engine.mjs";
 import { JsonMemory } from "../../src/benchmark/memory.mjs";
 import { JsonRunStore } from "../../src/benchmark/run-store.mjs";
+import { JsonApprovalStore } from "../../src/benchmark/approval-store.mjs";
 import { buildToolPrompt, parseToolCalls } from "../../src/benchmark/tool-protocol.mjs";
 import { BenchmarkRuntime } from "../../src/benchmark/runtime.mjs";
 
@@ -14,7 +15,7 @@ const provider = (id, value) => ({ id, name: id, model: id, health: async () => 
 
 async function tempRuntime(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jaslyn-runtime-"));
-  const runtime = new BenchmarkRuntime({ memory: new JsonMemory(join(dir, "memory.json")), runStore: new JsonRunStore(join(dir, "runs.json")), ...options });
+  const runtime = new BenchmarkRuntime({ memory: new JsonMemory(join(dir, "memory.json")), runStore: new JsonRunStore(join(dir, "runs.json")), approvalStore: new JsonApprovalStore(join(dir, "approvals.json")), ...options });
   await runtime.initialize();
   return { dir, runtime };
 }
@@ -53,13 +54,18 @@ test("runtime executes an authorized tool and persists an auditable run", async 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("runtime blocks approval-required tools without approval", async () => {
+test("runtime blocks approval-required tools without approval and creates an exact pending action", async () => {
   const { dir, runtime } = await tempRuntime({
-    providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "approval needed", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "danger", input: {} }] }) }],
+    providers: [{ id: "local", model: "local", health: async () => {}, reason: async () => ({ summary: "approval needed", proposedSteps: [], needsApproval: false, toolCalls: [{ name: "danger", input: { value: 7 } }] }) }],
     tools: [{ name: "danger", description: "Protected operation", requiresApproval: true, execute: async () => "should not run" }],
   });
-  try { const result = await runtime.run("protected operation", { providerId: "local" }); assert.equal(result.outcome.blocked, 1); assert.equal(result.outcome.completed, 0); assert.equal(result.verified, false); }
-  finally { await rm(dir, { recursive: true, force: true }); }
+  try {
+    const result = await runtime.run("protected operation", { providerId: "local" });
+    assert.equal(result.outcome.blocked, 1); assert.equal(result.outcome.completed, 0); assert.equal(result.verified, false);
+    assert.equal(result.approvals.length, 1);
+    assert.deepEqual(result.approvals[0].input, { value: 7 });
+    assert.equal(runtime.approvals({ status: "pending" }).length, 1);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test("runtime suppresses duplicate tool side effects within one run", async () => {
