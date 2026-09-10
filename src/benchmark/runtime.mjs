@@ -39,6 +39,7 @@ export class BenchmarkRuntime {
     let currentContext = request.context;
     const steps = [];
     const toolResults = [];
+    const executedCallKeys = new Set();
     let finalReasoning = null;
 
     for (let iteration = 1; iteration <= this.maxIterations; iteration++) {
@@ -55,9 +56,15 @@ export class BenchmarkRuntime {
       }
 
       const calls = dedupeCalls([...(finalReasoning.toolCalls || []), ...parseToolCalls(finalReasoning.raw || "")]);
-      if (!calls.length) break;
+      const newCalls = calls.filter((call) => {
+        const key = `${call.name}:${JSON.stringify(call.input || {})}`;
+        if (executedCallKeys.has(key)) return false;
+        executedCallKeys.add(key);
+        return true;
+      });
+      if (!newCalls.length) break;
 
-      for (const call of calls) {
+      for (const call of newCalls) {
         const tool = this.tools.get(call.name);
         if (!tool) {
           toolResults.push({ id: call.id, tool: call.name, ok: false, error: "Unknown tool" });
