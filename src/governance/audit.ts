@@ -1,2 +1,0 @@
-export interface AuditEvent{timestamp:string;actor:string;action:string;result:string;metadata?:Record<string,unknown>}
-export class AuditLog{private events:AuditEvent[]=[];append(event:Omit<AuditEvent,"timestamp">){const item={...event,timestamp:new Date().toISOString()};this.events.push(item);return item;}list(){return[...this.events];}}

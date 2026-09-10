@@ -24,17 +24,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Runtime versions
         run: node --version && npm --version
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Typecheck
-        run: npm run typecheck
+      - name: JavaScript boundary audit
+        run: npm run language:audit
+      - name: JavaScript syntax validation
+        run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js
       - name: Build
         run: npm run build
       - name: Tests
         run: npm test
-      - name: Benchmark security regressions
-        run: npm run benchmark:security
-      - name: Dependency-free runtime selftest
+      - name: Benchmark self-test
         run: npm run benchmark:selftest
+      - name: Benchmark security regression
+        run: npm run benchmark:security
