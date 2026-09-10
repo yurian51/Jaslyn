@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const runtime = await createJaslynBenchmarkRuntime().initialize();
-    const health = await runtime.health();
+    const health = await runtime.health({ timeoutMs: 5000 });
     return NextResponse.json({
       ok: health.some((provider) => provider.ok),
       providers: health,
@@ -14,9 +14,13 @@ export async function GET() {
         persistentMemory: true,
         persistentRunHistory: true,
         concurrentFanout: true,
+        providerFailover: true,
+        providerHealthChecks: true,
+        cancellableExecution: true,
         approvalGates: true,
         verifiedToolExecution: true,
       },
+      checkedAt: new Date().toISOString(),
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ ok: false, providers: [], error: error instanceof Error ? error.message : "Unable to inspect Jaslyn providers." }, { status: 500, headers: { "cache-control": "no-store" } });
