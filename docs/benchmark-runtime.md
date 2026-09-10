@@ -11,6 +11,8 @@ Jaslyn now adopts the strongest architectural patterns from the uploaded OpenCla
 5. **Persistent episodic memory**: `JsonMemory` keeps a bounded local memory with atomic writes and restrictive file permissions.
 6. **Runtime events**: each goal, reasoning pass, tool transition and verification result produces an inspectable event.
 7. **Provider health**: providers expose an explicit health contract rather than being assumed available.
+8. **Persistent approvals**: protected actions are stored with the exact tool name and input, expire after a bounded TTL, and can be consumed only once.
+9. **Approval execution**: approving an action executes the stored action, not a fresh model decision. Consumption happens before execution to prevent replay.
 
 ## What is deliberately not copied
 
@@ -22,13 +24,16 @@ The benchmark layer is written in JavaScript ESM (`.mjs`) and is consumed by the
 
 ## API behavior
 
-`POST /api/chat` now executes through the benchmark runtime. The response includes:
+`POST /api/chat` executes through the benchmark runtime. The response includes:
 
 - `reasoning`
 - `plan`
 - `toolResults`
+- `approvals` for protected actions
 - `outcome`
 - `verified`
 - runtime `events`
+
+`GET /api/approvals` exposes the current approval queue. `POST /api/approvals/:id` records a decision; an approved record is then atomically consumed and the exact stored tool input is executed once. Expired, rejected, or already-consumed approvals cannot execute.
 
 The `fanout` request flag enables the concurrent provider path when multiple providers are registered.
