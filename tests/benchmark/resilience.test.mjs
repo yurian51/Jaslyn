@@ -35,6 +35,25 @@ test("runtime fails over to the next provider when the primary errors", async ()
   assert.equal(result.status, "completed");
 });
 
+test("runtime skips an unhealthy provider before reasoning", async () => {
+  const { memory, runStore } = stores();
+  let primaryReasoned = false;
+  const runtime = new BenchmarkRuntime({
+    providers: [
+      { id: "unhealthy", model: "unhealthy", async health() { throw new Error("offline"); }, async reason() { primaryReasoned = true; return { summary: "should not run" }; } },
+      { id: "healthy", model: "healthy", async health() {}, async reason() { return { summary: "Healthy provider selected." }; } },
+    ],
+    memory,
+    runStore,
+    providerTimeoutMs: 1000,
+  });
+  await runtime.initialize();
+  const result = await runtime.run("choose a healthy provider");
+  assert.equal(primaryReasoned, false);
+  assert.equal(result.provider, "healthy");
+  assert.ok(result.events.some((event) => event.type === "provider.unhealthy"));
+});
+
 test("tool execution receives an abort signal when the timeout fires", async () => {
   const { memory, runStore } = stores();
   let aborted = false;
