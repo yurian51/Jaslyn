@@ -1,38 +1,45 @@
 import { ProviderRegistry } from "./provider-registry.mjs";
 import { JsonMemory } from "./memory.mjs";
+import { JsonRunStore } from "./run-store.mjs";
 import { ConcurrentEngine } from "./concurrent-engine.mjs";
 import { buildToolPrompt, parseToolCalls } from "./tool-protocol.mjs";
 
 export class BenchmarkRuntime {
-  constructor({ providers = [], tools = [], memory = new JsonMemory(), policy = {}, maxIterations = 8 } = {}) {
+  constructor({ providers = [], tools = [], memory = new JsonMemory(), runStore = new JsonRunStore(), policy = {}, maxIterations = 8, toolTimeoutMs = 30_000, maxContextChars = 32_000 } = {}) {
     this.registry = new ProviderRegistry();
     for (const provider of providers) this.registry.register(provider);
     this.tools = new Map(tools.map((tool) => [tool.name, tool]));
     this.memory = memory;
+    this.runStore = runStore;
     this.policy = { approvalRequired: new Set(policy.approvalRequired || []), deny: new Set(policy.deny || []) };
     this.maxIterations = Math.max(1, Math.min(32, Number(maxIterations) || 8));
+    this.toolTimeoutMs = Math.max(250, Math.min(300_000, Number(toolTimeoutMs) || 30_000));
+    this.maxContextChars = Math.max(4_000, Math.min(200_000, Number(maxContextChars) || 32_000));
     this.events = [];
   }
 
   async initialize() {
-    await this.memory.load();
+    await Promise.all([this.memory.load(), this.runStore.load()]);
     return this;
   }
 
   async run(instruction, { providerId, fanout = false, context = {}, approve = false } = {}) {
-    const goal = { id: crypto.randomUUID(), instruction: String(instruction || "").trim(), createdAt: new Date().toISOString() };
+    const startedAt = new Date().toISOString();
+    const goal = { id: crypto.randomUUID(), instruction: String(instruction || "").trim(), createdAt: startedAt };
     if (!goal.instruction) throw new Error("Jaslyn requires a non-empty goal.");
     this.#emit("goal.created", { goalId: goal.id, instruction: goal.instruction });
 
     const memories = this.memory.search(goal.instruction, { namespace: "episodic", limit: 8 });
     const toolPrompt = buildToolPrompt([...this.tools.values()]);
-    const request = { instruction: goal.instruction, context: { ...context, memories, toolProtocol: toolPrompt } };
+    const request = { instruction: goal.instruction, context: this.#boundContext({ ...context, memories, toolProtocol: toolPrompt }) };
 
     if (fanout) {
       const comparison = await new ConcurrentEngine({ registry: this.registry }).run(request);
+      const outcome = { providers: comparison.results.length, successCount: comparison.successCount, failedCount: comparison.results.length - comparison.successCount };
       this.#emit("reasoning.fanout", { providers: comparison.results.length, successCount: comparison.successCount });
-      await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { mode: "fanout", successCount: comparison.successCount } });
-      return { goal, mode: "fanout", comparison, events: this.events.slice() };
+      await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { mode: "fanout", ...outcome } });
+      await this.runStore.append({ id: goal.id, goal: goal.instruction, mode: "fanout", status: comparison.successCount ? "completed" : "failed", startedAt, finishedAt: new Date().toISOString(), verified: comparison.successCount > 0, outcome, stepCount: 0, toolCount: 0 });
+      return { goal, mode: "fanout", comparison, outcome, events: this.events.slice() };
     }
 
     const provider = this.#selectProvider(providerId);
@@ -41,6 +48,7 @@ export class BenchmarkRuntime {
     const toolResults = [];
     const executedCallKeys = new Set();
     let finalReasoning = null;
+    let status = "completed";
 
     for (let iteration = 1; iteration <= this.maxIterations; iteration++) {
       this.#emit("reasoning.started", { goalId: goal.id, iteration, provider: provider.id });
@@ -50,6 +58,7 @@ export class BenchmarkRuntime {
       this.#emit("reasoning.completed", { goalId: goal.id, iteration, needsApproval: finalReasoning.needsApproval });
 
       if (finalReasoning.needsApproval && !approve && !(finalReasoning.toolCalls?.length || parseToolCalls(finalReasoning.raw || "").length)) {
+        status = "blocked";
         toolResults.push({ id: crypto.randomUUID(), tool: "approval", ok: false, blocked: true, error: finalReasoning.approvalReason || "Approval required" });
         this.#emit("run.blocked", { goalId: goal.id, reason: finalReasoning.approvalReason || "Approval required" });
         break;
@@ -79,7 +88,7 @@ export class BenchmarkRuntime {
           continue;
         }
         try {
-          const value = await tool.execute(call.input, { runId: goal.id, agentId: "jaslyn", iteration });
+          const value = await withTimeout(Promise.resolve(tool.execute(call.input, { runId: goal.id, agentId: "jaslyn", iteration })), this.toolTimeoutMs, `Tool ${call.name} timed out`);
           const result = { id: call.id, tool: call.name, ok: true, output: value };
           toolResults.push(result);
           this.#emit("tool.completed", { id: call.id, tool: call.name });
@@ -88,25 +97,37 @@ export class BenchmarkRuntime {
           toolResults.push(result);
           this.#emit("tool.failed", result);
         }
-        currentContext = { ...currentContext, toolResults: toolResults.slice(-12) };
+        currentContext = this.#boundContext({ ...currentContext, toolResults: toolResults.slice(-12) });
       }
     }
 
     const verified = verifyOutcome(finalReasoning, toolResults, steps);
+    if (!verified && status === "completed") status = "unverified";
     const outcome = { verified, completed: toolResults.filter((r) => r.ok).length, failed: toolResults.filter((r) => !r.ok && !r.blocked).length, blocked: toolResults.filter((r) => r.blocked).length };
     await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { provider: provider.id, verified, outcome, steps: steps.length } });
     this.#emit("run.verified", { goalId: goal.id, ...outcome });
-    return { goal, provider: provider.id, reasoning: finalReasoning, steps, toolResults, outcome, verified, events: this.events.slice() };
+    await this.runStore.append({ id: goal.id, goal: goal.instruction, provider: provider.id, status, startedAt, finishedAt: new Date().toISOString(), verified, outcome, stepCount: steps.length, toolCount: toolResults.length });
+    return { goal, provider: provider.id, reasoning: finalReasoning, steps, toolResults, outcome, verified, status, events: this.events.slice() };
   }
 
   async health() {
     return this.registry.health();
   }
 
+  history(options) {
+    return this.runStore.list(options);
+  }
+
   #selectProvider(id) {
     const provider = id ? this.registry.get(id) : this.registry.get(this.registry.list()[0]?.id);
     if (!provider) throw new Error("No Jaslyn provider is registered.");
     return provider;
+  }
+
+  #boundContext(context) {
+    const serialized = JSON.stringify(context);
+    if (serialized.length <= this.maxContextChars) return context;
+    return { ...context, _truncated: true, _contextNote: serialized.slice(0, this.maxContextChars) };
   }
 
   #emit(type, data) {
@@ -123,11 +144,16 @@ function normalizeReasoning(value) {
 function dedupeCalls(calls) {
   const seen = new Set();
   return calls.filter((call) => {
+    if (!call || typeof call.name !== "string" || !call.name.trim()) return false;
     const key = `${call.name}:${JSON.stringify(call.input || {})}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs))]);
 }
 
 function verifyOutcome(reasoning, toolResults, steps) {
