@@ -24,7 +24,6 @@ export async function POST(request: Request) {
     if (!parsed.success) return NextResponse.json({ error: "Valid messages are required." }, { status: 400 });
     const lastUser = [...parsed.data.messages].reverse().find((message) => message.role === "user")?.content;
     if (!lastUser) return NextResponse.json({ error: "A user message is required." }, { status: 400 });
-
     if (!process.env.JASLYN_INFERENCE_URL) return NextResponse.json({ error: "Configure JASLYN_INFERENCE_URL for Jaslyn's self-hosted model brain." }, { status: 503 });
 
     const runtime = await createJaslynBenchmarkRuntime({
@@ -32,34 +31,15 @@ export async function POST(request: Request) {
       maxIterations: 8,
     }).initialize();
 
-    const context = {
-      system: JASLYN_SYSTEM,
-      conversation: parsed.data.messages,
-      temperature: parsed.data.temperature,
-    };
-
-    const result = await runtime.run(lastUser, {
-      providerId: "jaslyn-local",
-      context,
-      fanout: parsed.data.fanout,
-    });
+    const context = { system: JASLYN_SYSTEM, conversation: parsed.data.messages, temperature: parsed.data.temperature };
+    const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout });
 
     if (result.mode === "fanout") {
       return NextResponse.json({ provider: "jaslyn-benchmark", mode: "fanout", comparison: result.comparison, events: result.events });
     }
 
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
-    return NextResponse.json({
-      provider: "jaslyn",
-      model: result.provider,
-      message: { role: "assistant", content },
-      reasoning: result.reasoning,
-      plan: result.steps,
-      toolResults: result.toolResults,
-      outcome: result.outcome,
-      verified: result.verified,
-      events: result.events,
-    });
+    return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, outcome: result.outcome, verified: result.verified, events: result.events });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed." }, { status: 500 });
   }
