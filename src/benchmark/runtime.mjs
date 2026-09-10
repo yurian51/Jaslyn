@@ -6,159 +6,33 @@ import { buildToolPrompt, parseToolCalls } from "./tool-protocol.mjs";
 
 export class BenchmarkRuntime {
   constructor({ providers = [], tools = [], memory = new JsonMemory(), runStore = new JsonRunStore(), policy = {}, maxIterations = 8, toolTimeoutMs = 30_000, maxContextChars = 32_000 } = {}) {
-    this.registry = new ProviderRegistry();
-    for (const provider of providers) this.registry.register(provider);
-    this.tools = new Map(tools.map((tool) => [tool.name, tool]));
-    this.memory = memory;
-    this.runStore = runStore;
+    this.registry = new ProviderRegistry(); for (const provider of providers) this.registry.register(provider);
+    this.tools = new Map(tools.map((tool) => [tool.name, tool])); this.memory = memory; this.runStore = runStore;
     this.policy = { approvalRequired: new Set(policy.approvalRequired || []), deny: new Set(policy.deny || []) };
-    this.maxIterations = Math.max(1, Math.min(32, Number(maxIterations) || 8));
-    this.toolTimeoutMs = Math.max(250, Math.min(300_000, Number(toolTimeoutMs) || 30_000));
-    this.maxContextChars = Math.max(4_000, Math.min(200_000, Number(maxContextChars) || 32_000));
-    this.events = [];
+    this.maxIterations = Math.max(1, Math.min(32, Number(maxIterations) || 8)); this.toolTimeoutMs = Math.max(250, Math.min(300_000, Number(toolTimeoutMs) || 30_000)); this.maxContextChars = Math.max(4_000, Math.min(200_000, Number(maxContextChars) || 32_000)); this.events = [];
   }
-
-  async initialize() {
-    await Promise.all([this.memory.load(), this.runStore.load()]);
-    return this;
-  }
-
-  async run(instruction, { providerId, fanout = false, context = {}, approve = false } = {}) {
-    const startedAt = new Date().toISOString();
-    const goal = { id: crypto.randomUUID(), instruction: String(instruction || "").trim(), createdAt: startedAt };
-    if (!goal.instruction) throw new Error("Jaslyn requires a non-empty goal.");
-    this.#emit("goal.created", { goalId: goal.id, instruction: goal.instruction });
-
-    const memories = this.memory.search(goal.instruction, { namespace: "episodic", limit: 8 });
-    const toolPrompt = buildToolPrompt([...this.tools.values()]);
-    const request = { instruction: goal.instruction, context: this.#boundContext({ ...context, memories, toolProtocol: toolPrompt }) };
-
-    if (fanout) {
-      const comparison = await new ConcurrentEngine({ registry: this.registry }).run(request);
-      const outcome = { providers: comparison.results.length, successCount: comparison.successCount, failedCount: comparison.results.length - comparison.successCount };
-      this.#emit("reasoning.fanout", { providers: comparison.results.length, successCount: comparison.successCount });
-      await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { mode: "fanout", ...outcome } });
-      await this.runStore.append({ id: goal.id, goal: goal.instruction, mode: "fanout", status: comparison.successCount ? "completed" : "failed", startedAt, finishedAt: new Date().toISOString(), verified: comparison.successCount > 0, outcome, stepCount: 0, toolCount: 0 });
-      return { goal, mode: "fanout", comparison, outcome, events: this.events.slice() };
+  async initialize(){await Promise.all([this.memory.load(),this.runStore.load()]);return this;}
+  async run(instruction,{providerId,fanout=false,context={},approve=false}={}){
+    this.events=[]; const startedAt=new Date().toISOString(); const goal={id:crypto.randomUUID(),instruction:String(instruction||"").trim(),createdAt:startedAt}; if(!goal.instruction)throw new Error("Jaslyn requires a non-empty goal."); this.#emit("goal.created",{goalId:goal.id,instruction:goal.instruction});
+    const memories=this.memory.search(goal.instruction,{namespace:"episodic",limit:8}); const request={instruction:goal.instruction,context:this.#boundContext({...context,memories,toolProtocol:buildToolPrompt([...this.tools.values()])})};
+    if(fanout){const comparison=await new ConcurrentEngine({registry:this.registry}).run(request);const verified=comparison.successCount>0;const outcome={verified,completed:comparison.successCount,failed:comparison.errorCount,blocked:0};this.#emit("reasoning.fanout",{providers:comparison.results.length,successCount:comparison.successCount});await this.memory.remember({namespace:"episodic",content:goal.instruction,metadata:{mode:"fanout",successCount:comparison.successCount}});await this.runStore.append({id:goal.id,goal:goal.instruction,mode:"fanout",status:verified?"completed":"failed",startedAt,finishedAt:new Date().toISOString(),verified,outcome,stepCount:0,toolCount:0});return{goal,mode:"fanout",comparison,outcome,verified,status:verified?"completed":"failed",events:this.events.slice()};}
+    const provider=this.#selectProvider(providerId);let currentContext=request.context;const steps=[];const toolResults=[];const executedCallKeys=new Set();let finalReasoning=null;let status="completed";
+    for(let iteration=1;iteration<=this.maxIterations;iteration++){
+      this.#emit("reasoning.started",{goalId:goal.id,iteration,provider:provider.id}); finalReasoning=normalizeReasoning(await provider.reason({instruction:goal.instruction,context:currentContext})); steps.push(...finalReasoning.proposedSteps.map(description=>({id:crypto.randomUUID(),description,iteration}))); this.#emit("reasoning.completed",{goalId:goal.id,iteration,needsApproval:finalReasoning.needsApproval});
+      if(finalReasoning.needsApproval&&!approve&&!(finalReasoning.toolCalls?.length||parseToolCalls(finalReasoning.raw||"").length)){toolResults.push({id:crypto.randomUUID(),tool:"approval",ok:false,blocked:true,error:finalReasoning.approvalReason||"Approval required"});this.#emit("run.blocked",{goalId:goal.id,reason:finalReasoning.approvalReason||"Approval required"});status="blocked";break;}
+      const calls=dedupeCalls([...(finalReasoning.toolCalls||[]),...parseToolCalls(finalReasoning.raw||"")]);const newCalls=calls.filter(call=>{const key=`${call.name}:${JSON.stringify(call.input||{})}`;if(executedCallKeys.has(key))return false;executedCallKeys.add(key);return true;});if(!newCalls.length)break;
+      for(const call of newCalls){const tool=this.tools.get(call.name);if(!tool){toolResults.push({id:call.id,tool:call.name,ok:false,error:"Unknown tool"});status="failed";continue;}const denied=this.policy.deny.has(call.name);const requiresApproval=this.policy.approvalRequired.has(call.name)||tool.requiresApproval===true;if(denied||(requiresApproval&&!approve)){const result={id:call.id,tool:call.name,ok:false,blocked:true,error:denied?"Tool denied by policy":"Approval required"};toolResults.push(result);this.#emit("tool.blocked",result);status="blocked";continue;}try{const value=await withTimeout(Promise.resolve(tool.execute(call.input,{runId:goal.id,agentId:"jaslyn",iteration})),this.toolTimeoutMs);const result={id:call.id,tool:call.name,ok:true,output:value};toolResults.push(result);this.#emit("tool.completed",{id:call.id,tool:call.name});}catch(error){const result={id:call.id,tool:call.name,ok:false,error:error instanceof Error?error.message:String(error)};toolResults.push(result);this.#emit("tool.failed",result);status="failed";}currentContext=this.#boundContext({...currentContext,toolResults:toolResults.slice(-12)});}
     }
-
-    const provider = this.#selectProvider(providerId);
-    let currentContext = request.context;
-    const steps = [];
-    const toolResults = [];
-    const executedCallKeys = new Set();
-    let finalReasoning = null;
-    let status = "completed";
-
-    for (let iteration = 1; iteration <= this.maxIterations; iteration++) {
-      this.#emit("reasoning.started", { goalId: goal.id, iteration, provider: provider.id });
-      const reasoning = await provider.reason({ instruction: goal.instruction, context: currentContext });
-      finalReasoning = normalizeReasoning(reasoning);
-      steps.push(...finalReasoning.proposedSteps.map((description) => ({ id: crypto.randomUUID(), description, iteration })));
-      this.#emit("reasoning.completed", { goalId: goal.id, iteration, needsApproval: finalReasoning.needsApproval });
-
-      if (finalReasoning.needsApproval && !approve && !(finalReasoning.toolCalls?.length || parseToolCalls(finalReasoning.raw || "").length)) {
-        status = "blocked";
-        toolResults.push({ id: crypto.randomUUID(), tool: "approval", ok: false, blocked: true, error: finalReasoning.approvalReason || "Approval required" });
-        this.#emit("run.blocked", { goalId: goal.id, reason: finalReasoning.approvalReason || "Approval required" });
-        break;
-      }
-
-      const calls = dedupeCalls([...(finalReasoning.toolCalls || []), ...parseToolCalls(finalReasoning.raw || "")]);
-      const newCalls = calls.filter((call) => {
-        const key = `${call.name}:${JSON.stringify(call.input || {})}`;
-        if (executedCallKeys.has(key)) return false;
-        executedCallKeys.add(key);
-        return true;
-      });
-      if (!newCalls.length) break;
-
-      for (const call of newCalls) {
-        const tool = this.tools.get(call.name);
-        if (!tool) {
-          toolResults.push({ id: call.id, tool: call.name, ok: false, error: "Unknown tool" });
-          continue;
-        }
-        const denied = this.policy.deny.has(call.name);
-        const requiresApproval = this.policy.approvalRequired.has(call.name) || tool.requiresApproval === true;
-        if (denied || (requiresApproval && !approve)) {
-          const result = { id: call.id, tool: call.name, ok: false, blocked: true, error: denied ? "Tool denied by policy" : "Approval required" };
-          toolResults.push(result);
-          this.#emit("tool.blocked", result);
-          continue;
-        }
-        try {
-          const value = await withTimeout(Promise.resolve(tool.execute(call.input, { runId: goal.id, agentId: "jaslyn", iteration })), this.toolTimeoutMs, `Tool ${call.name} timed out`);
-          const result = { id: call.id, tool: call.name, ok: true, output: value };
-          toolResults.push(result);
-          this.#emit("tool.completed", { id: call.id, tool: call.name });
-        } catch (error) {
-          const result = { id: call.id, tool: call.name, ok: false, error: error instanceof Error ? error.message : String(error) };
-          toolResults.push(result);
-          this.#emit("tool.failed", result);
-        }
-        currentContext = this.#boundContext({ ...currentContext, toolResults: toolResults.slice(-12) });
-      }
-    }
-
-    const verified = verifyOutcome(finalReasoning, toolResults, steps);
-    if (!verified && status === "completed") status = "unverified";
-    const outcome = { verified, completed: toolResults.filter((r) => r.ok).length, failed: toolResults.filter((r) => !r.ok && !r.blocked).length, blocked: toolResults.filter((r) => r.blocked).length };
-    await this.memory.remember({ namespace: "episodic", content: goal.instruction, metadata: { provider: provider.id, verified, outcome, steps: steps.length } });
-    this.#emit("run.verified", { goalId: goal.id, ...outcome });
-    await this.runStore.append({ id: goal.id, goal: goal.instruction, provider: provider.id, status, startedAt, finishedAt: new Date().toISOString(), verified, outcome, stepCount: steps.length, toolCount: toolResults.length });
-    return { goal, provider: provider.id, reasoning: finalReasoning, steps, toolResults, outcome, verified, status, events: this.events.slice() };
+    const verified=verifyOutcome(finalReasoning,toolResults,steps);if(!verified&&status==="completed")status="unverified";const outcome={verified,completed:toolResults.filter(r=>r.ok).length,failed:toolResults.filter(r=>!r.ok&&!r.blocked).length,blocked:toolResults.filter(r=>r.blocked).length};await this.memory.remember({namespace:"episodic",content:goal.instruction,metadata:{provider:provider.id,verified,outcome,steps:steps.length}});this.#emit("run.verified",{goalId:goal.id,...outcome});await this.runStore.append({id:goal.id,goal:goal.instruction,provider:provider.id,status,startedAt,finishedAt:new Date().toISOString(),verified,outcome,stepCount:steps.length,toolCount:toolResults.length});return{goal,provider:provider.id,reasoning:finalReasoning,steps,toolResults,outcome,verified,status,events:this.events.slice()};
   }
-
-  async health() {
-    return this.registry.health();
-  }
-
-  history(options) {
-    return this.runStore.list(options);
-  }
-
-  #selectProvider(id) {
-    const provider = id ? this.registry.get(id) : this.registry.get(this.registry.list()[0]?.id);
-    if (!provider) throw new Error("No Jaslyn provider is registered.");
-    return provider;
-  }
-
-  #boundContext(context) {
-    const serialized = JSON.stringify(context);
-    if (serialized.length <= this.maxContextChars) return context;
-    return { ...context, _truncated: true, _contextNote: serialized.slice(0, this.maxContextChars) };
-  }
-
-  #emit(type, data) {
-    this.events.push({ id: crypto.randomUUID(), type, timestamp: new Date().toISOString(), data });
-    if (this.events.length > 500) this.events.shift();
-  }
+  async health(){return this.registry.health();}
+  history(options){return this.runStore.list(options);}
+  getRun(id){return this.runStore.get(id);}
+  #selectProvider(id){const provider=id?this.registry.get(id):this.registry.get(this.registry.list()[0]?.id);if(!provider)throw new Error("No Jaslyn provider is registered.");return provider;}
+  #boundContext(context){const serialized=JSON.stringify(context);if(serialized.length<=this.maxContextChars)return context;return{_truncated:true,_contextNote:serialized.slice(0,this.maxContextChars)};}
+  #emit(type,data){this.events.push({id:crypto.randomUUID(),type,timestamp:new Date().toISOString(),data});if(this.events.length>500)this.events.shift();}
 }
-
-function normalizeReasoning(value) {
-  if (!value || typeof value !== "object") return { summary: String(value || ""), proposedSteps: [], needsApproval: false, approvalReason: "", toolCalls: [], raw: String(value || "") };
-  return { summary: String(value.summary || value.content || ""), proposedSteps: Array.isArray(value.proposedSteps) ? value.proposedSteps.map(String) : [], intent: String(value.intent || ""), decision: String(value.decision || ""), needsApproval: Boolean(value.needsApproval), approvalReason: String(value.approvalReason || ""), toolCalls: Array.isArray(value.toolCalls) ? value.toolCalls : [], raw: typeof value.raw === "string" ? value.raw : "" };
-}
-
-function dedupeCalls(calls) {
-  const seen = new Set();
-  return calls.filter((call) => {
-    if (!call || typeof call.name !== "string" || !call.name.trim()) return false;
-    const key = `${call.name}:${JSON.stringify(call.input || {})}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function withTimeout(promise, timeoutMs, message) {
-  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs))]);
-}
-
-function verifyOutcome(reasoning, toolResults, steps) {
-  if (!reasoning) return false;
-  if (reasoning.needsApproval && toolResults.some((r) => r.blocked)) return false;
-  if (toolResults.some((r) => !r.ok && !r.blocked)) return false;
-  return Boolean(reasoning.summary || reasoning.decision || steps.length);
-}
+function normalizeReasoning(value){if(!value||typeof value!=="object")return{summary:String(value||""),proposedSteps:[],needsApproval:false,approvalReason:"",toolCalls:[],raw:String(value||"")};return{summary:String(value.summary||value.content||""),proposedSteps:Array.isArray(value.proposedSteps)?value.proposedSteps.map(String):[],intent:String(value.intent||""),decision:String(value.decision||""),needsApproval:Boolean(value.needsApproval),approvalReason:String(value.approvalReason||""),toolCalls:Array.isArray(value.toolCalls)?value.toolCalls:[],raw:typeof value.raw==="string"?value.raw:""};}
+function dedupeCalls(calls){const seen=new Set();return calls.filter(call=>{if(!call||typeof call.name!=="string"||!call.name.trim())return false;const key=`${call.name}:${JSON.stringify(call.input||{})}`;if(seen.has(key))return false;seen.add(key);return true;});}
+function verifyOutcome(reasoning,toolResults,steps){if(!reasoning)return false;if(reasoning.needsApproval&&toolResults.some(r=>r.blocked))return false;if(toolResults.some(r=>!r.ok&&!r.blocked))return false;return Boolean(reasoning.summary||reasoning.decision||steps.length);}
+function withTimeout(promise,timeoutMs){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Tool timeout after ${timeoutMs}ms`)),timeoutMs);})]).finally(()=>clearTimeout(timer));}
