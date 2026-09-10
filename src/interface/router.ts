@@ -1,2 +1,0 @@
-import type {InterfaceRequest} from "./types.js";
-export class InterfaceRouter{normalize(request:InterfaceRequest){return{...request,message:request.message.trim(),receivedAt:new Date().toISOString()};}}
