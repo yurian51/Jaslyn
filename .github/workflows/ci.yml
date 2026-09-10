@@ -2,24 +2,36 @@ name: Jaslyn CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "feat/openclaw-benchmark-runtime"]
   pull_request:
+    branches: ["main"]
 
 permissions:
   contents: read
+
+concurrency:
+  group: jaslyn-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --version
-      - run: npm --version
-      - run: npm install --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
+          cache: npm
+      - name: Runtime versions
+        run: node --version && npm --version
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Tests
+        run: npm test
