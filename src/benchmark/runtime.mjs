@@ -27,7 +27,7 @@ export class BenchmarkRuntime {
     return this;
   }
 
-  async run(instruction, { providerId, fanout = false, context = {}, approve = false } = {}) {
+  async run(instruction, { providerId, fanout = false, context = {} } = {}) {
     this.events = [];
     const startedAt = new Date().toISOString();
     const goal = { id: crypto.randomUUID(), instruction: String(instruction || "").trim(), createdAt: startedAt };
@@ -65,7 +65,7 @@ export class BenchmarkRuntime {
         steps.push(...finalReasoning.proposedSteps.map((description) => ({ id: crypto.randomUUID(), description, iteration, provider: activeProvider.id })));
         this.#emit("reasoning.completed", { goalId: goal.id, iteration, provider: activeProvider.id, needsApproval: finalReasoning.needsApproval });
 
-        if (finalReasoning.needsApproval && !approve && !(finalReasoning.toolCalls?.length || parseToolCalls(finalReasoning.raw || "").length)) {
+        if (finalReasoning.needsApproval && !(finalReasoning.toolCalls?.length || parseToolCalls(finalReasoning.raw || "").length)) {
           status = "blocked";
           this.#emit("run.blocked", { goalId: goal.id, reason: finalReasoning.approvalReason || "Approval required" });
           break;
@@ -88,7 +88,7 @@ export class BenchmarkRuntime {
           }
           const denied = this.policy.deny.has(call.name);
           const requiresApproval = this.policy.approvalRequired.has(call.name) || tool.requiresApproval === true;
-          if (denied || (requiresApproval && !approve)) {
+          if (denied || requiresApproval) {
             const reason = denied ? "Tool denied by policy" : "Approval required";
             const approval = denied ? null : await this.approvalStore.create({ runId: goal.id, tool: call.name, input: call.input || {}, reason });
             if (approval) approvals.push(approval);
