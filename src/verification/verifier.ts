@@ -1,2 +1,0 @@
-import type {VerificationResult} from "./types.js";
-export class OutcomeVerifier{verify(expected:string,actual:unknown):VerificationResult{const evidence=[{source:"runtime",claim:"Execution produced an observable result",value:actual}];const verified=actual!==undefined&&actual!==null;return{verified,score:verified?1:0,evidence,failures:verified?[]:[`No observable result for expected outcome: ${expected}`]};}}
