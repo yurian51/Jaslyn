@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { createJaslynBenchmarkRuntime } from "../../../../src/benchmark/index.mjs";
+import { authorizeRequest } from "../../../../src/security/api-auth.mjs";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request, { params }) {
+  const auth = await authorizeRequest(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "cache-control": "no-store" } });
   try {
     const { id } = await params;
     if (!id || id.length > 128) return NextResponse.json({ error: "A valid approval id is required." }, { status: 400 });
@@ -22,6 +25,6 @@ export async function POST(request, { params }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to decide approval.";
     const status = /not found/i.test(message) ? 404 : /already|expired|not approved/i.test(message) ? 409 : 500;
-    return NextResponse.json({ error: message }, { status, headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ error: status === 500 ? "Unable to process approval." : message }, { status, headers: { "cache-control": "no-store" } });
   }
 }
