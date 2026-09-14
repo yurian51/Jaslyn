@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runPythonTool } from "../../../src/bridge/python-runner.mjs";
 import { createJaslynBenchmarkRuntime } from "../../../src/benchmark/index.mjs";
+import { authorizeRequest } from "../../../src/security/api-auth.mjs";
 
 export const dynamic = "force-dynamic";
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -14,33 +15,24 @@ const schema = z.object({
 });
 const JASLYN_SYSTEM = `You are Jaslyn, an independent general-purpose AI agent. You can help with conversation, analysis, writing, coding, debugging, planning, research, and structured work. You are not GPT, Claude, Gemini, Copilot, Manus, or a clone of another product. Be direct, accurate, and useful. Never claim an external action happened without execution evidence. Keep hidden chain-of-thought private; provide concise reasoning summaries, plans, assumptions, and verifiable results.`;
 
-function errorResponse(message, requestId, status, headers, latencyMs) {
-  return NextResponse.json({ error: message, requestId, latencyMs }, { status, headers });
-}
+function errorResponse(message, requestId, status, headers, latencyMs) { return NextResponse.json({ error: message, requestId, latencyMs }, { status, headers }); }
 
 export async function POST(request) {
   const requestStartedAt = Date.now();
   const requestId = request.headers.get("x-request-id")?.slice(0, 128) || crypto.randomUUID();
   const headers = { "cache-control": "no-store", "x-jaslyn-request-id": requestId };
   try {
+    if (process.env.JASLYN_ALLOW_ANONYMOUS_API !== "1") {
+      const auth = await authorizeRequest(request);
+      if (!auth.ok) return errorResponse(auth.error, requestId, auth.status, headers, Date.now() - requestStartedAt);
+    }
     const contentLengthHeader = request.headers.get("content-length");
     const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
-    if (contentLength !== null && (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_REQUEST_BYTES)) {
-      return errorResponse("Request payload is too large.", requestId, 413, headers, Date.now() - requestStartedAt);
-    }
-    if (process.env.JASLYN_REQUIRE_API_KEY === "1") {
-      const supplied = request.headers.get("x-jaslyn-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-      const check = await runPythonTool({ tool: "api_key_verify", args: { key: supplied || "" } });
-      if (!check.valid) return errorResponse("A valid Jaslyn API key is required.", requestId, 401, headers, Date.now() - requestStartedAt);
-    }
+    if (contentLength !== null && (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_REQUEST_BYTES)) return errorResponse("Request payload is too large.", requestId, 413, headers, Date.now() - requestStartedAt);
     const rawBody = await request.arrayBuffer();
     if (rawBody.byteLength > MAX_REQUEST_BYTES) return errorResponse("Request payload is too large.", requestId, 413, headers, Date.now() - requestStartedAt);
     let body;
-    try {
-      body = JSON.parse(new TextDecoder().decode(rawBody));
-    } catch {
-      return errorResponse("Request body must contain valid JSON.", requestId, 400, headers, Date.now() - requestStartedAt);
-    }
+    try { body = JSON.parse(new TextDecoder().decode(rawBody)); } catch { return errorResponse("Request body must contain valid JSON.", requestId, 400, headers, Date.now() - requestStartedAt); }
     const parsed = schema.safeParse(body);
     if (!parsed.success) return errorResponse("Valid messages are required.", requestId, 400, headers, Date.now() - requestStartedAt);
     const lastUser = [...parsed.data.messages].reverse().find((message) => message.role === "user")?.content;
@@ -53,7 +45,5 @@ export async function POST(request) {
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
     const run = { id: result.goal.id, goal: result.goal.instruction, provider: result.provider, status: result.status, reasoning: result.reasoning?.summary || "", intent: result.reasoning?.intent || "", decision: result.reasoning?.decision || "", needsApproval: Boolean(result.reasoning?.needsApproval || result.approvals?.length), approvalReason: result.reasoning?.approvalReason || result.approvals?.[0]?.reason || "", approvals: (result.approvals || []).map((item) => ({ id: item.id, tool: item.tool, reason: item.reason, status: item.status, createdAt: item.createdAt, expiresAt: item.expiresAt })), steps: result.steps.map((step) => step.description), execution: { events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") || event.type.includes("failed") ? "blocked" : "completed" })), completed: result.outcome.completed, verified: result.verified ? 1 : 0, blocked: result.outcome.blocked, maxSteps: 100 }, toolResults: result.toolResults.map((tool) => ({ id: tool.id, tool: tool.tool, ok: tool.ok, blocked: Boolean(tool.blocked), error: tool.error || null, approvalId: tool.approvalId || null })) };
     return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, approvals: result.approvals || [], outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, requestId, latencyMs: Date.now() - requestStartedAt }, { headers });
-  } catch {
-    return errorResponse("Jaslyn chat could not process the request.", requestId, 503, headers, Date.now() - requestStartedAt);
-  }
+  } catch { return errorResponse("Jaslyn chat could not process the request.", requestId, 503, headers, Date.now() - requestStartedAt); }
 }
