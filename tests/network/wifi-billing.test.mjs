@@ -14,9 +14,15 @@ const plan = createWifiPlan({
   simultaneousDevices: 2
 });
 
-test("plan normalization rejects invalid currency and negative prices", () => {
-  assert.throws(() => createWifiPlan({ ...plan, currency: "XXX" }), /Unsupported currency/);
+test("plan normalization rejects unsupported currency and invalid monetary units", () => {
+  assert.throws(() => createWifiPlan({ ...plan, currency: "NOT" }), /Unsupported currency/);
+  assert.throws(() => createWifiPlan({ ...plan, currency: "US" }), /Unsupported currency/);
   assert.throws(() => createWifiPlan({ ...plan, priceMinor: -1 }), /priceMinor/);
+  assert.throws(() => createWifiPlan({ ...plan, priceMinor: 1.5 }), /priceMinor.*integer/);
+  assert.throws(() => createWifiPlan({ ...plan, dataLimitBytes: 1.5 }), /dataLimitBytes.*integer/);
+  assert.throws(() => createWifiPlan({ ...plan, downloadKbps: 1.5 }), /downloadKbps.*integer/);
+  assert.throws(() => createWifiPlan({ ...plan, simultaneousDevices: 1.5 }), /simultaneousDevices.*integer/);
+  assert.equal(createWifiPlan({ ...plan, currency: "EUR" }).currency, "EUR");
 });
 
 test("client identity normalizes MAC addresses and validates IP addresses", () => {
@@ -64,6 +70,15 @@ test("usage at or after expiry closes the session and rejects the write", () => 
   const session = engine.getSession("s-1");
   assert.equal(session.status, "closed");
   assert.equal(session.endedAt, 11_000);
+});
+
+test("usage rejects non-integer byte counters and preserves quota state on rejection", () => {
+  const engine = new WifiBillingEngine({ idFactory: () => "s-1", clock: () => 1000 });
+  engine.addPlan({ ...plan, dataLimitBytes: 100 });
+  engine.startSession({ planId: plan.id, client: { ipAddress: "10.0.0.10" } });
+  assert.throws(() => engine.recordUsage("s-1", { downloadBytes: 1.5 }), /downloadBytes.*integer/);
+  assert.throws(() => engine.recordUsage("s-1", { downloadBytes: 101 }), /DATA_QUOTA_EXCEEDED/);
+  assert.deepEqual(engine.getSession("s-1").usage, { uploadBytes: 0, downloadBytes: 0 });
 });
 
 test("usage cannot be recorded after session closure", () => {
