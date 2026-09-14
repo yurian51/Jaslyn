@@ -34,7 +34,8 @@ test("client identity normalizes MAC addresses and validates IP addresses", () =
 });
 
 test("duplicate active client sessions are rejected", () => {
-  const engine = new WifiBillingEngine({ idFactory: (() => { let n = 0; return () => `s-${++n};` })(), clock: () => 1000 });
+  let nextId = 0;
+  const engine = new WifiBillingEngine({ idFactory: () => `s-${++nextId}`, clock: () => 1000 });
   engine.addPlan(plan);
   engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:55" } });
   assert.throws(
