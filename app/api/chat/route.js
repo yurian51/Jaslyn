@@ -14,23 +14,38 @@ const schema = z.object({
 });
 const JASLYN_SYSTEM = `You are Jaslyn, an independent general-purpose AI agent. You can help with conversation, analysis, writing, coding, debugging, planning, research, and structured work. You are not GPT, Claude, Gemini, Copilot, Manus, or a clone of another product. Be direct, accurate, and useful. Never claim an external action happened without execution evidence. Keep hidden chain-of-thought private; provide concise reasoning summaries, plans, assumptions, and verifiable results.`;
 
+function errorResponse(message, requestId, status, headers, latencyMs) {
+  return NextResponse.json({ error: message, requestId, latencyMs }, { status, headers });
+}
+
 export async function POST(request) {
   const requestStartedAt = Date.now();
   const requestId = request.headers.get("x-request-id")?.slice(0, 128) || crypto.randomUUID();
   const headers = { "cache-control": "no-store", "x-jaslyn-request-id": requestId };
   try {
-    const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > MAX_REQUEST_BYTES) return NextResponse.json({ error: "Request payload is too large.", requestId }, { status: 413, headers });
+    const contentLengthHeader = request.headers.get("content-length");
+    const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
+    if (contentLength !== null && (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_REQUEST_BYTES)) {
+      return errorResponse("Request payload is too large.", requestId, 413, headers, Date.now() - requestStartedAt);
+    }
     if (process.env.JASLYN_REQUIRE_API_KEY === "1") {
       const supplied = request.headers.get("x-jaslyn-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
       const check = await runPythonTool({ tool: "api_key_verify", args: { key: supplied || "" } });
-      if (!check.valid) return NextResponse.json({ error: "A valid Jaslyn API key is required.", requestId }, { status: 401, headers });
+      if (!check.valid) return errorResponse("A valid Jaslyn API key is required.", requestId, 401, headers, Date.now() - requestStartedAt);
     }
-    const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: "Valid messages are required.", requestId }, { status: 400, headers });
+    const rawBody = await request.arrayBuffer();
+    if (rawBody.byteLength > MAX_REQUEST_BYTES) return errorResponse("Request payload is too large.", requestId, 413, headers, Date.now() - requestStartedAt);
+    let body;
+    try {
+      body = JSON.parse(new TextDecoder().decode(rawBody));
+    } catch {
+      return errorResponse("Request body must contain valid JSON.", requestId, 400, headers, Date.now() - requestStartedAt);
+    }
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) return errorResponse("Valid messages are required.", requestId, 400, headers, Date.now() - requestStartedAt);
     const lastUser = [...parsed.data.messages].reverse().find((message) => message.role === "user")?.content;
-    if (!lastUser) return NextResponse.json({ error: "A user message is required.", requestId }, { status: 400, headers });
-    if (!process.env.JASLYN_INFERENCE_URL) return NextResponse.json({ error: "Configure JASLYN_INFERENCE_URL for Jaslyn's self-hosted model brain.", requestId }, { status: 503, headers });
+    if (!lastUser) return errorResponse("A user message is required.", requestId, 400, headers, Date.now() - requestStartedAt);
+    if (!process.env.JASLYN_INFERENCE_URL) return errorResponse("Configure JASLYN_INFERENCE_URL for Jaslyn's self-hosted model brain.", requestId, 503, headers, Date.now() - requestStartedAt);
     const runtime = await createJaslynBenchmarkRuntime({ provider: { id: "jaslyn-local", model: parsed.data.model || process.env.JASLYN_MODEL || "jaslyn" }, maxIterations: 8 }).initialize();
     const context = { system: JASLYN_SYSTEM, conversation: parsed.data.messages, temperature: parsed.data.temperature, requestId };
     const result = await runtime.run(lastUser, { context, fanout: parsed.data.fanout });
@@ -38,7 +53,7 @@ export async function POST(request) {
     const content = result.reasoning?.summary || result.reasoning?.decision || "Jaslyn completed a reasoning pass without a final summary.";
     const run = { id: result.goal.id, goal: result.goal.instruction, provider: result.provider, status: result.status, reasoning: result.reasoning?.summary || "", intent: result.reasoning?.intent || "", decision: result.reasoning?.decision || "", needsApproval: Boolean(result.reasoning?.needsApproval || result.approvals?.length), approvalReason: result.reasoning?.approvalReason || result.approvals?.[0]?.reason || "", approvals: (result.approvals || []).map((item) => ({ id: item.id, tool: item.tool, reason: item.reason, status: item.status, createdAt: item.createdAt, expiresAt: item.expiresAt })), steps: result.steps.map((step) => step.description), execution: { events: result.events.map((event, index) => ({ index: index + 1, description: event.type, status: event.type.includes("blocked") || event.type.includes("failed") ? "blocked" : "completed" })), completed: result.outcome.completed, verified: result.verified ? 1 : 0, blocked: result.outcome.blocked, maxSteps: 100 }, toolResults: result.toolResults.map((tool) => ({ id: tool.id, tool: tool.tool, ok: tool.ok, blocked: Boolean(tool.blocked), error: tool.error || null, approvalId: tool.approvalId || null })) };
     return NextResponse.json({ provider: "jaslyn", model: result.provider, message: { role: "assistant", content }, run, reasoning: result.reasoning, plan: result.steps, toolResults: result.toolResults, approvals: result.approvals || [], outcome: result.outcome, verified: result.verified, status: result.status, events: result.events, requestId, latencyMs: Date.now() - requestStartedAt }, { headers });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Jaslyn chat failed.", requestId, latencyMs: Date.now() - requestStartedAt }, { status: 500, headers });
+  } catch {
+    return errorResponse("Jaslyn chat could not process the request.", requestId, 503, headers, Date.now() - requestStartedAt);
   }
 }
