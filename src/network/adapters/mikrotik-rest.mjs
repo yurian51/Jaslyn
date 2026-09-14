@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 function assertNonEmptyString(value, field) {
@@ -18,8 +20,9 @@ function encodeBasicAuth(username, password) {
 }
 
 function assertIpClient(client) {
-  if (!client?.ipAddress) throw new TypeError("MikroTik bandwidth enforcement requires client.ipAddress");
-  return client.ipAddress;
+  const ipAddress = String(client?.ipAddress ?? "").trim();
+  if (!ipAddress || isIP(ipAddress) === 0) throw new TypeError("MikroTik bandwidth enforcement requires a valid client.ipAddress");
+  return ipAddress;
 }
 
 function toRateLimitKbps(kbps, field) {
@@ -30,6 +33,10 @@ function toRateLimitKbps(kbps, field) {
 
 function queueNameForIp(ipAddress) {
   return `jaslyn-${ipAddress.replace(/[^0-9a-f:.]/gi, "-").replace(/:+/g, "-")}`.slice(0, 63);
+}
+
+function targetForIp(ipAddress) {
+  return `${ipAddress}/${isIP(ipAddress) === 6 ? 128 : 32}`;
 }
 
 function parseJsonText(text) {
@@ -106,7 +113,7 @@ export function createMikrotikRestAdapter({
 
       const queue = {
         name: queueName,
-        target: `${ipAddress}/32`,
+        target: targetForIp(ipAddress),
         "max-limit": `${upload}/${download}`,
         comment: `Jaslyn Net ${policy.planId}`
       };
