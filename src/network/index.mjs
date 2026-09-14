@@ -9,3 +9,4 @@ export {
 } from "./wifi-billing.mjs";
 
 export { NetworkEnforcementOrchestrator } from "./enforcement.mjs";
+export { createMikrotikRestAdapter } from "./adapters/mikrotik-rest.mjs";
