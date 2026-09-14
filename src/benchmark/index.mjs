@@ -34,3 +34,4 @@ export { JsonMemory } from "./memory.mjs";
 export { JsonRunStore } from "./run-store.mjs";
 export { JsonApprovalStore } from "./approval-store.mjs";
 export { buildToolPrompt, parseToolCalls, stripToolCalls } from "./tool-protocol.mjs";
+export { createWifiPlan, normalizeClientIdentity, buildEnforcementPolicy, calculateCharge, WifiBillingEngine, NetworkAdapterRegistry, WIFI_BILLING_CAPABILITIES } from "../network/wifi-billing.mjs";
