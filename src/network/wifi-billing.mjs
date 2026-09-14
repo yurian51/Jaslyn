@@ -82,6 +82,8 @@ export class WifiBillingEngine {
   #idFactory;
 
   constructor({ clock = () => Date.now(), idFactory = randomUUID } = {}) {
+    if (typeof clock !== "function") throw new TypeError("clock must be a function");
+    if (typeof idFactory !== "function") throw new TypeError("idFactory must be a function");
     this.#clock = clock;
     this.#idFactory = idFactory;
   }
@@ -119,6 +121,7 @@ export class WifiBillingEngine {
     const session = {
       id,
       planId: plan.id,
+      planSnapshot: plan,
       client: identity,
       subscriberKey,
       startedAt,
@@ -129,7 +132,7 @@ export class WifiBillingEngine {
       currency: plan.currency
     };
     this.#sessions.set(id, session);
-    return snapshotSession(session, plan);
+    return snapshotSession(session);
   }
 
   recordUsage(sessionId, { uploadBytes = 0, downloadBytes = 0, at = this.#clock() } = {}) {
@@ -140,7 +143,7 @@ export class WifiBillingEngine {
     assertNonNegativeInteger(downloadBytes, "downloadBytes");
     if (!Number.isFinite(at)) throw new TypeError("at must be a timestamp");
     if (at < session.startedAt) throw new Error("USAGE_TIMESTAMP_BEFORE_SESSION");
-    const plan = this.#plans.get(session.planId);
+    const plan = session.planSnapshot;
     if (at - session.startedAt >= plan.durationSeconds * 1000) {
       this.#closeAt(session, session.startedAt + plan.durationSeconds * 1000, plan);
       throw new Error("SESSION_EXPIRED");
@@ -153,7 +156,7 @@ export class WifiBillingEngine {
     if (plan.dataLimitBytes != null && nextTotal > plan.dataLimitBytes) throw new Error("DATA_QUOTA_EXCEEDED");
     session.usage.uploadBytes = nextUpload;
     session.usage.downloadBytes = nextDownload;
-    return snapshotSession(session, plan);
+    return snapshotSession(session);
   }
 
   expireSessions(at = this.#clock()) {
@@ -161,7 +164,7 @@ export class WifiBillingEngine {
     let expired = 0;
     for (const session of this.#sessions.values()) {
       if (session.status !== "active") continue;
-      const plan = this.#plans.get(session.planId);
+      const plan = session.planSnapshot;
       if (at - session.startedAt >= plan.durationSeconds * 1000) {
         this.#closeAt(session, session.startedAt + plan.durationSeconds * 1000, plan);
         expired += 1;
@@ -175,19 +178,19 @@ export class WifiBillingEngine {
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
     if (session.status !== "active") throw new Error("SESSION_NOT_ACTIVE");
     if (!Number.isFinite(endedAt) || endedAt < session.startedAt) throw new TypeError("endedAt must be a timestamp after startedAt");
-    const plan = this.#plans.get(session.planId);
+    const plan = session.planSnapshot;
     const effectiveEnd = Math.min(endedAt, session.startedAt + plan.durationSeconds * 1000);
     this.#closeAt(session, effectiveEnd, plan);
-    return snapshotSession(session, plan);
+    return snapshotSession(session);
   }
 
   getSession(sessionId) {
     const session = this.#sessions.get(String(sessionId));
-    return session ? snapshotSession(session, this.#plans.get(session.planId)) : null;
+    return session ? snapshotSession(session) : null;
   }
 
   listSessions({ status } = {}) {
-    return [...this.#sessions.values()].filter((session) => !status || session.status === status).map((session) => snapshotSession(session, this.#plans.get(session.planId)));
+    return [...this.#sessions.values()].filter((session) => !status || session.status === status).map((session) => snapshotSession(session));
   }
 
   #closeAt(session, endedAt, plan) {
@@ -203,6 +206,7 @@ export class NetworkAdapterRegistry {
   register({ protocol, capabilities = [], adapter }) {
     const key = String(protocol ?? "").trim().toUpperCase();
     if (!ADAPTER_PROTOCOLS.has(key)) throw new TypeError(`Unsupported adapter protocol: ${key}`);
+    if (!Array.isArray(capabilities)) throw new TypeError("capabilities must be an array");
     if (!adapter || typeof adapter !== "object") throw new TypeError("adapter is required");
     if (typeof adapter.health !== "function" || typeof adapter.enforcePolicy !== "function") throw new TypeError("adapter must expose health() and enforcePolicy()");
     const normalizedCapabilities = [...new Set(capabilities.map((value) => String(value).trim()).filter(Boolean))];
@@ -243,7 +247,7 @@ function sameIdentity(a, b) {
   return false;
 }
 
-function snapshotSession(session, plan) {
+function snapshotSession(session) {
   return Object.freeze({
     id: session.id,
     planId: session.planId,
@@ -253,8 +257,8 @@ function snapshotSession(session, plan) {
     status: session.status,
     usage: Object.freeze({ ...session.usage }),
     chargedMinor: session.chargedMinor,
-    currency: plan?.currency ?? session.currency,
-    policy: plan ? buildEnforcementPolicy(plan) : null
+    currency: session.planSnapshot?.currency ?? session.currency,
+    policy: session.planSnapshot ? buildEnforcementPolicy(session.planSnapshot) : null
   });
 }
 
