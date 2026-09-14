@@ -23,7 +23,7 @@ function createBuiltinTools(memory) {
     { name: "clock.now", description: "Return the current ISO timestamp.", execute: async () => new Date().toISOString() },
     { name: "echo", description: "Return the supplied JSON input unchanged.", execute: async (input) => input },
     { name: "memory.search", description: "Search Jaslyn's persistent episodic memory.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] }, execute: async (input) => memory.search(input?.query || "", { limit: Number(input?.limit) || 8 }) },
-    { name: "memory.remember", description: "Persist a useful fact or completed outcome to Jaslyn's episodic memory.", inputSchema: { type: "object", properties: { content: { type: "string" }, metadata: { type: "object" } }, required: ["content"], execute: async (input) => memory.remember({ namespace: "episodic", content: input?.content || "", metadata: input?.metadata || {} }) },
+    { name: "memory.remember", description: "Persist a useful fact or completed outcome to Jaslyn's episodic memory.", inputSchema: { type: "object", properties: { content: { type: "string" }, metadata: { type: "object" } }, required: ["content"] }, execute: async (input) => memory.remember({ namespace: "episodic", content: input?.content || "", metadata: input?.metadata || {} }) },
   ];
 }
 
