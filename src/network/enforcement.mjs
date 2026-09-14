@@ -1,4 +1,4 @@
-import { buildEnforcementPolicy } from "./wifi-billing.mjs";
+import { buildEnforcementPolicy, normalizeClientIdentity } from "./wifi-billing.mjs";
 
 const REQUIRED_CAPABILITIES = Object.freeze(["bandwidth"]);
 
@@ -22,7 +22,22 @@ export class NetworkEnforcementOrchestrator {
       };
     }
 
-    const policy = buildEnforcementPolicy(plan);
+    let policy;
+    let normalizedClient;
+    try {
+      policy = buildEnforcementPolicy(plan);
+      normalizedClient = normalizeClientIdentity(client);
+    } catch (error) {
+      return {
+        ok: false,
+        status: "blocked",
+        reason: "INVALID_NETWORK_REQUEST",
+        protocol: registration.protocol,
+        error: safeError(error),
+        client: client ?? null
+      };
+    }
+
     const missing = REQUIRED_CAPABILITIES.filter((capability) => !registration.capabilities.includes(capability));
     if (missing.length) {
       return {
@@ -31,11 +46,24 @@ export class NetworkEnforcementOrchestrator {
         reason: "ADAPTER_CAPABILITY_MISSING",
         missingCapabilities: missing,
         protocol: registration.protocol,
-        client: client ?? null
+        client: normalizedClient
       };
     }
 
-    const health = await registration.adapter.health({ context });
+    let health;
+    try {
+      health = await registration.adapter.health({ context });
+    } catch (error) {
+      return {
+        ok: false,
+        status: "blocked",
+        reason: "NETWORK_ADAPTER_HEALTHCHECK_FAILED",
+        protocol: registration.protocol,
+        error: safeError(error),
+        client: normalizedClient
+      };
+    }
+
     if (!health?.ok) {
       return {
         ok: false,
@@ -43,15 +71,27 @@ export class NetworkEnforcementOrchestrator {
         reason: "NETWORK_ADAPTER_UNHEALTHY",
         protocol: registration.protocol,
         health: sanitizeHealth(health),
-        client: client ?? null
+        client: normalizedClient
       };
     }
 
-    const result = await registration.adapter.enforcePolicy({
-      client,
-      policy,
-      context
-    });
+    let result;
+    try {
+      result = await registration.adapter.enforcePolicy({
+        client: normalizedClient,
+        policy,
+        context
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        status: "failed",
+        reason: "NETWORK_POLICY_ENFORCEMENT_FAILED",
+        protocol: registration.protocol,
+        error: safeError(error),
+        client: normalizedClient
+      };
+    }
 
     if (!result?.ok) {
       return {
@@ -59,8 +99,8 @@ export class NetworkEnforcementOrchestrator {
         status: "failed",
         reason: "NETWORK_POLICY_REJECTED",
         protocol: registration.protocol,
-        result: result ?? null,
-        client: client ?? null
+        result: safeResult(result),
+        client: normalizedClient
       };
     }
 
@@ -68,9 +108,9 @@ export class NetworkEnforcementOrchestrator {
       ok: true,
       status: "enforced",
       protocol: registration.protocol,
-      client: client ?? null,
+      client: normalizedClient,
       policy,
-      result
+      result: safeResult(result)
     };
   }
 }
@@ -82,4 +122,21 @@ function sanitizeHealth(health) {
     status: health.status == null ? null : String(health.status),
     code: health.code == null ? null : String(health.code)
   };
+}
+
+function safeError(error) {
+  return {
+    code: error?.code == null ? "NETWORK_ADAPTER_ERROR" : String(error.code),
+    message: error?.message == null ? "Network adapter operation failed" : String(error.message)
+  };
+}
+
+function safeResult(result) {
+  if (!result || typeof result !== "object") return result ?? null;
+  const safe = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (/token|secret|password|authorization|api[-_]?key/i.test(key)) continue;
+    safe[key] = value;
+  }
+  return safe;
 }
