@@ -1,6 +1,6 @@
 # Jaslyn
 
-Jaslyn is an independent, JARVIS-class autonomous AI agent runtime and control surface.
+Jaslyn is an independent autonomous AI agent runtime and control surface.
 
 ## Vision
 
@@ -53,6 +53,10 @@ JASLYN_MODEL=your-model
 ```
 
 The protocol is OpenAI-compatible, but Jaslyn is not presented as GPT, Claude, Gemini, or another vendor's identity. The endpoint is an infrastructure boundary for model inference; the agent runtime, policy, memory, tool protocol, approvals, verification, and execution control remain Jaslyn-owned code.
+
+## API security
+
+Production API endpoints require a Jaslyn API key by default. Use `JASLYN_ADMIN_KEY` as the bootstrap credential for API-key management, and keep it in the deployment secret manager. `JASLYN_ALLOW_ANONYMOUS_API=1` is an explicit opt-in for intentionally public local deployments and should not be enabled on internet-facing instances.
 
 ## Security boundary
 
