@@ -87,6 +87,27 @@ test("MikroTik adapter updates an existing queue instead of duplicating it", asy
   assert.equal(requests[1].url, "https://router.example.test/rest/queue/simple/*99");
 });
 
+test("MikroTik adapter uses /128 for IPv6 queue targets", async () => {
+  const requests = [];
+  const adapter = createMikrotikRestAdapter({
+    baseUrl: "https://router.example.test",
+    username: "jaslyn-net",
+    password: "secret",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.includes("queue/simple?")) return response([]);
+      return response({ ".id": "*ipv6" });
+    }
+  });
+
+  await adapter.enforcePolicy({
+    client: { ipAddress: "2001:db8::10" },
+    policy: { planId: "ipv6", bandwidth: { downloadKbps: 2000, uploadKbps: 1000 } }
+  });
+
+  assert.equal(JSON.parse(requests[1].options.body).target, "2001:db8::10/128");
+});
+
 test("MikroTik adapter rejects MAC-only clients because simple queues need an IP target", async () => {
   const adapter = createMikrotikRestAdapter({
     baseUrl: "https://router.example.test",
@@ -96,7 +117,7 @@ test("MikroTik adapter rejects MAC-only clients because simple queues need an IP
   });
   await assert.rejects(
     () => adapter.enforcePolicy({ client: { macAddress: "00:11:22:33:44:55" }, policy: { planId: "daily", bandwidth: { downloadKbps: 1000 } } }),
-    /requires client\.ipAddress/
+    /requires a valid client\.ipAddress/
   );
 });
 
