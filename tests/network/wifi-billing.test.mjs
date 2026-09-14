@@ -33,13 +33,24 @@ test("client identity normalizes MAC addresses and validates IP addresses", () =
   assert.throws(() => engine.startSession({ planId: plan.id, client: { ipAddress: "not-an-ip" } }), /valid IPv4 or IPv6/);
 });
 
-test("simultaneous-device limit is enforced", () => {
+test("duplicate active client sessions are rejected", () => {
+  const engine = new WifiBillingEngine({ idFactory: (() => { let n = 0; return () => `s-${++n};` })(), clock: () => 1000 });
+  engine.addPlan(plan);
+  engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:55" } });
+  assert.throws(
+    () => engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:55" } }),
+    /CLIENT_SESSION_ALREADY_ACTIVE/
+  );
+});
+
+test("simultaneous-device limit counts distinct devices under one subscriber", () => {
   let nextId = 0;
   const engine = new WifiBillingEngine({ idFactory: () => `s-${++nextId}`, clock: () => 1000 });
-  engine.addPlan({ ...plan, simultaneousDevices: 1 });
-  engine.startSession({ planId: plan.id, client: { username: "subscriber-1" } });
+  engine.addPlan({ ...plan, simultaneousDevices: 2 });
+  engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:55" } });
+  engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:66" } });
   assert.throws(
-    () => engine.startSession({ planId: plan.id, client: { username: "subscriber-1" } }),
+    () => engine.startSession({ planId: plan.id, client: { subscriberId: "subscriber-1", macAddress: "00:11:22:33:44:77" } }),
     /SIMULTANEOUS_DEVICE_LIMIT_REACHED/
   );
 });
