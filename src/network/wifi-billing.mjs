@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 
 const SUPPORTED_CURRENCIES = new Set([
@@ -61,6 +62,7 @@ export function normalizeClientIdentity(identity) {
   const macAddress = identity.macAddress ? normalizeMac(identity.macAddress) : null;
   const username = identity.username == null ? null : String(identity.username).trim();
   const ipAddress = identity.ipAddress == null ? null : String(identity.ipAddress).trim();
+  if (ipAddress && isIP(ipAddress) === 0) throw new TypeError("ipAddress must be a valid IPv4 or IPv6 address");
   if (!macAddress && !username && !ipAddress) throw new TypeError("client identity requires macAddress, username, or ipAddress");
   return Object.freeze({ macAddress, username: username || null, ipAddress: ipAddress || null });
 }
@@ -95,8 +97,9 @@ export class WifiBillingEngine {
   startSession({ planId, client, startedAt = this.#clock() }) {
     const plan = this.#plans.get(String(planId));
     if (!plan) throw new Error(`Unknown plan: ${planId}`);
-    const identity = normalizeClientIdentity(client);
     if (!Number.isFinite(startedAt)) throw new TypeError("startedAt must be a timestamp");
+    this.expireSessions(startedAt);
+    const identity = normalizeClientIdentity(client);
     const activeForClient = [...this.#sessions.values()].filter((session) => session.status === "active" && sameIdentity(session.client, identity));
     if (activeForClient.length >= plan.simultaneousDevices) throw new Error("SIMULTANEOUS_DEVICE_LIMIT_REACHED");
 
@@ -125,12 +128,29 @@ export class WifiBillingEngine {
     if (!Number.isFinite(at)) throw new TypeError("at must be a timestamp");
     if (at < session.startedAt) throw new Error("USAGE_TIMESTAMP_BEFORE_SESSION");
     const plan = this.#plans.get(session.planId);
+    if (at - session.startedAt >= plan.durationSeconds * 1000) {
+      this.#closeAt(session, at, plan);
+      throw new Error("SESSION_EXPIRED");
+    }
     const nextTotal = session.usage.uploadBytes + session.usage.downloadBytes + uploadBytes + downloadBytes;
     if (plan.dataLimitBytes != null && nextTotal > plan.dataLimitBytes) throw new Error("DATA_QUOTA_EXCEEDED");
-    if (at - session.startedAt > plan.durationSeconds * 1000) throw new Error("SESSION_DURATION_EXCEEDED");
     session.usage.uploadBytes += uploadBytes;
     session.usage.downloadBytes += downloadBytes;
     return snapshotSession(session, plan);
+  }
+
+  expireSessions(at = this.#clock()) {
+    if (!Number.isFinite(at)) throw new TypeError("at must be a timestamp");
+    let expired = 0;
+    for (const session of this.#sessions.values()) {
+      if (session.status !== "active") continue;
+      const plan = this.#plans.get(session.planId);
+      if (at - session.startedAt >= plan.durationSeconds * 1000) {
+        this.#closeAt(session, session.startedAt + plan.durationSeconds * 1000, plan);
+        expired += 1;
+      }
+    }
+    return expired;
   }
 
   closeSession(sessionId, { endedAt = this.#clock() } = {}) {
@@ -139,9 +159,8 @@ export class WifiBillingEngine {
     if (session.status !== "active") throw new Error("SESSION_NOT_ACTIVE");
     if (!Number.isFinite(endedAt) || endedAt < session.startedAt) throw new TypeError("endedAt must be a timestamp after startedAt");
     const plan = this.#plans.get(session.planId);
-    session.endedAt = endedAt;
-    session.status = "closed";
-    session.chargedMinor = calculateCharge(plan, session.startedAt, endedAt, session.usage);
+    const effectiveEnd = Math.min(endedAt, session.startedAt + plan.durationSeconds * 1000);
+    this.#closeAt(session, effectiveEnd, plan);
     return snapshotSession(session, plan);
   }
 
@@ -152,6 +171,12 @@ export class WifiBillingEngine {
 
   listSessions({ status } = {}) {
     return [...this.#sessions.values()].filter((session) => !status || session.status === status).map((session) => snapshotSession(session, this.#plans.get(session.planId)));
+  }
+
+  #closeAt(session, endedAt, plan) {
+    session.endedAt = endedAt;
+    session.status = "closed";
+    session.chargedMinor = calculateCharge(plan, session.startedAt, endedAt, session.usage);
   }
 }
 
@@ -220,5 +245,6 @@ export const WIFI_BILLING_CAPABILITIES = Object.freeze([
   "simultaneous-device-limits",
   "provider-neutral-adapter-registry",
   "mac-username-ip-client-identity",
-  "fail-closed-validation"
+  "fail-closed-validation",
+  "automatic-session-expiry"
 ]);
