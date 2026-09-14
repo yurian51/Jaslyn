@@ -1,9 +1,11 @@
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 
-const SUPPORTED_CURRENCIES = new Set([
-  "TZS", "KES", "UGX", "RWF", "BIF", "ETB", "NGN", "GHS", "ZAR", "USD", "EUR", "GBP"
-]);
+const SUPPORTED_CURRENCIES = new Set(
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("currency")
+    : ["TZS", "KES", "UGX", "RWF", "BIF", "ETB", "NGN", "GHS", "ZAR", "USD", "EUR", "GBP"]
+);
 
 const ADAPTER_PROTOCOLS = new Set([
   "MIKROTIK_API",
@@ -16,6 +18,16 @@ const ADAPTER_PROTOCOLS = new Set([
 
 function assertFinitePositive(value, field) {
   if (!Number.isFinite(value) || value <= 0) throw new TypeError(`${field} must be a finite positive number`);
+  return value;
+}
+
+function assertPositiveInteger(value, field) {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${field} must be a positive integer`);
+  return value;
+}
+
+function assertNonNegativeInteger(value, field) {
+  if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${field} must be a non-negative integer`);
   return value;
 }
 
@@ -32,7 +44,7 @@ function normalizeMac(mac) {
 
 function normalizeCurrency(currency) {
   const value = String(currency ?? "").trim().toUpperCase();
-  if (!SUPPORTED_CURRENCIES.has(value)) throw new TypeError(`Unsupported currency: ${value || "empty"}`);
+  if (!/^[A-Z]{3}$/.test(value) || !SUPPORTED_CURRENCIES.has(value)) throw new TypeError(`Unsupported currency: ${value || "empty"}`);
   return value;
 }
 
@@ -42,12 +54,12 @@ function normalizePlan(plan) {
     id: String(plan.id ?? "").trim(),
     name: String(plan.name ?? "").trim(),
     currency: normalizeCurrency(plan.currency),
-    priceMinor: assertNonNegative(plan.priceMinor, "priceMinor"),
+    priceMinor: assertNonNegativeInteger(plan.priceMinor, "priceMinor"),
     durationSeconds: assertFinitePositive(plan.durationSeconds, "durationSeconds"),
-    dataLimitBytes: plan.dataLimitBytes == null ? null : assertFinitePositive(plan.dataLimitBytes, "dataLimitBytes"),
-    downloadKbps: plan.downloadKbps == null ? null : assertFinitePositive(plan.downloadKbps, "downloadKbps"),
-    uploadKbps: plan.uploadKbps == null ? null : assertFinitePositive(plan.uploadKbps, "uploadKbps"),
-    simultaneousDevices: plan.simultaneousDevices == null ? 1 : Math.max(1, Math.floor(assertFinitePositive(plan.simultaneousDevices, "simultaneousDevices")))
+    dataLimitBytes: plan.dataLimitBytes == null ? null : assertNonNegativeInteger(plan.dataLimitBytes, "dataLimitBytes"),
+    downloadKbps: plan.downloadKbps == null ? null : assertPositiveInteger(plan.downloadKbps, "downloadKbps"),
+    uploadKbps: plan.uploadKbps == null ? null : assertPositiveInteger(plan.uploadKbps, "uploadKbps"),
+    simultaneousDevices: plan.simultaneousDevices == null ? 1 : assertPositiveInteger(plan.simultaneousDevices, "simultaneousDevices")
   };
   if (!normalized.id || !normalized.name) throw new TypeError("plan.id and plan.name are required");
   return Object.freeze(normalized);
@@ -104,6 +116,8 @@ export class WifiBillingEngine {
     if (activeForClient.length >= plan.simultaneousDevices) throw new Error("SIMULTANEOUS_DEVICE_LIMIT_REACHED");
 
     const id = String(this.#idFactory());
+    if (!id) throw new Error("SESSION_ID_GENERATION_FAILED");
+    if (this.#sessions.has(id)) throw new Error("SESSION_ID_COLLISION");
     const session = {
       id,
       planId: plan.id,
@@ -123,19 +137,23 @@ export class WifiBillingEngine {
     const session = this.#sessions.get(String(sessionId));
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
     if (session.status !== "active") throw new Error("SESSION_NOT_ACTIVE");
-    assertNonNegative(uploadBytes, "uploadBytes");
-    assertNonNegative(downloadBytes, "downloadBytes");
+    assertNonNegativeInteger(uploadBytes, "uploadBytes");
+    assertNonNegativeInteger(downloadBytes, "downloadBytes");
     if (!Number.isFinite(at)) throw new TypeError("at must be a timestamp");
     if (at < session.startedAt) throw new Error("USAGE_TIMESTAMP_BEFORE_SESSION");
     const plan = this.#plans.get(session.planId);
     if (at - session.startedAt >= plan.durationSeconds * 1000) {
-      this.#closeAt(session, at, plan);
+      this.#closeAt(session, session.startedAt + plan.durationSeconds * 1000, plan);
       throw new Error("SESSION_EXPIRED");
     }
-    const nextTotal = session.usage.uploadBytes + session.usage.downloadBytes + uploadBytes + downloadBytes;
+    const nextUpload = session.usage.uploadBytes + uploadBytes;
+    const nextDownload = session.usage.downloadBytes + downloadBytes;
+    if (!Number.isSafeInteger(nextUpload) || !Number.isSafeInteger(nextDownload)) throw new RangeError("usage exceeds safe integer range");
+    const nextTotal = nextUpload + nextDownload;
+    if (!Number.isSafeInteger(nextTotal)) throw new RangeError("usage exceeds safe integer range");
     if (plan.dataLimitBytes != null && nextTotal > plan.dataLimitBytes) throw new Error("DATA_QUOTA_EXCEEDED");
-    session.usage.uploadBytes += uploadBytes;
-    session.usage.downloadBytes += downloadBytes;
+    session.usage.uploadBytes = nextUpload;
+    session.usage.downloadBytes = nextDownload;
     return snapshotSession(session, plan);
   }
 
@@ -210,8 +228,8 @@ export function buildEnforcementPolicy(plan) {
 export function calculateCharge(plan, startedAt, endedAt, usage = { uploadBytes: 0, downloadBytes: 0 }) {
   const normalized = normalizePlan(plan);
   if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt < startedAt) throw new TypeError("session timestamps must be valid and ordered");
-  assertNonNegative(usage.uploadBytes, "usage.uploadBytes");
-  assertNonNegative(usage.downloadBytes, "usage.downloadBytes");
+  assertNonNegativeInteger(usage.uploadBytes, "usage.uploadBytes");
+  assertNonNegativeInteger(usage.downloadBytes, "usage.downloadBytes");
   return endedAt === startedAt ? 0 : normalized.priceMinor;
 }
 
