@@ -113,6 +113,18 @@ test("manual close clamps billing session to plan duration", () => {
   assert.equal(closed.chargedMinor, 5000);
 });
 
+test("active sessions retain their purchased plan terms after plan upsert", () => {
+  const engine = new WifiBillingEngine({ idFactory: () => "s-1", clock: () => 1000 });
+  engine.addPlan({ ...plan, durationSeconds: 10, priceMinor: 5000, downloadKbps: 10_000 });
+  const session = engine.startSession({ planId: plan.id, client: { username: "subscriber-1" }, startedAt: 1000 });
+  engine.upsertPlan({ ...plan, durationSeconds: 100, priceMinor: 9000, downloadKbps: 50_000 });
+  assert.equal(engine.getSession(session.id).policy.durationSeconds, 10);
+  assert.equal(engine.getSession(session.id).policy.bandwidth.downloadKbps, 10_000);
+  const closed = engine.closeSession(session.id, { endedAt: 11_000 });
+  assert.equal(closed.endedAt, 11_000);
+  assert.equal(closed.chargedMinor, 5000);
+});
+
 test("enforcement policy is provider-neutral and preserves bandwidth/quota", () => {
   const policy = buildEnforcementPolicy(plan);
   assert.deepEqual(policy, {
@@ -128,6 +140,10 @@ test("adapter registry requires real health and enforcement methods", () => {
   assert.throws(
     () => registry.register({ protocol: "MERAKI_DASHBOARD_API", adapter: {} }),
     /health\(\) and enforcePolicy\(\)/
+  );
+  assert.throws(
+    () => registry.register({ protocol: "MERAKI_DASHBOARD_API", capabilities: "bandwidth", adapter: { health: async () => ({ ok: true }), enforcePolicy: async () => ({ ok: true }) } }),
+    /capabilities must be an array/
   );
   registry.register({
     protocol: "MERAKI_DASHBOARD_API",
