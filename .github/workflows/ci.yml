@@ -2,7 +2,7 @@ name: Jaslyn CI
 
 on:
   push:
-    branches: ["main", "feat/openclaw-benchmark-runtime"]
+    branches: ["main", "feat/openclaw-benchmark-runtime", "feat/jaslyn-net-wifi-billing-core"]
   pull_request:
     branches: ["main"]
 
@@ -32,11 +32,13 @@ jobs:
       - name: JavaScript boundary audit
         run: npm run language:audit
       - name: JavaScript syntax validation
-        run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js
+        run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js && node --check src/network/wifi-billing.mjs && node --check src/network/enforcement.mjs
       - name: Build
         run: npm run build
       - name: Tests
         run: npm test
+      - name: Network billing tests
+        run: node --test tests/network/*.test.mjs
       - name: Benchmark self-test
         run: npm run benchmark:selftest
       - name: Benchmark security regression
