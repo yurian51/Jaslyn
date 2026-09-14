@@ -31,11 +31,6 @@ function assertNonNegativeInteger(value, field) {
   return value;
 }
 
-function assertNonNegative(value, field) {
-  if (!Number.isFinite(value) || value < 0) throw new TypeError(`${field} must be a finite non-negative number`);
-  return value;
-}
-
 function normalizeMac(mac) {
   const value = String(mac ?? "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
   if (!/^[0-9a-f]{12}$/.test(value)) throw new TypeError("macAddress must contain exactly 12 hexadecimal characters");
@@ -71,12 +66,13 @@ export function createWifiPlan(plan) {
 
 export function normalizeClientIdentity(identity) {
   if (!identity || typeof identity !== "object") throw new TypeError("client identity is required");
+  const subscriberId = identity.subscriberId == null ? null : String(identity.subscriberId).trim();
   const macAddress = identity.macAddress ? normalizeMac(identity.macAddress) : null;
   const username = identity.username == null ? null : String(identity.username).trim();
   const ipAddress = identity.ipAddress == null ? null : String(identity.ipAddress).trim();
   if (ipAddress && isIP(ipAddress) === 0) throw new TypeError("ipAddress must be a valid IPv4 or IPv6 address");
   if (!macAddress && !username && !ipAddress) throw new TypeError("client identity requires macAddress, username, or ipAddress");
-  return Object.freeze({ macAddress, username: username || null, ipAddress: ipAddress || null });
+  return Object.freeze({ subscriberId: subscriberId || null, macAddress, username: username || null, ipAddress: ipAddress || null });
 }
 
 export class WifiBillingEngine {
@@ -112,8 +108,10 @@ export class WifiBillingEngine {
     if (!Number.isFinite(startedAt)) throw new TypeError("startedAt must be a timestamp");
     this.expireSessions(startedAt);
     const identity = normalizeClientIdentity(client);
-    const activeForClient = [...this.#sessions.values()].filter((session) => session.status === "active" && sameIdentity(session.client, identity));
-    if (activeForClient.length >= plan.simultaneousDevices) throw new Error("SIMULTANEOUS_DEVICE_LIMIT_REACHED");
+    const subscriberKey = identity.subscriberId || clientFingerprint(identity);
+    const activeForSubscriber = [...this.#sessions.values()].filter((session) => session.status === "active" && (session.subscriberKey === subscriberKey || sameIdentity(session.client, identity)));
+    if (activeForSubscriber.some((session) => sameIdentity(session.client, identity))) throw new Error("CLIENT_SESSION_ALREADY_ACTIVE");
+    if (activeForSubscriber.length >= plan.simultaneousDevices) throw new Error("SIMULTANEOUS_DEVICE_LIMIT_REACHED");
 
     const id = String(this.#idFactory());
     if (!id) throw new Error("SESSION_ID_GENERATION_FAILED");
@@ -122,6 +120,7 @@ export class WifiBillingEngine {
       id,
       planId: plan.id,
       client: identity,
+      subscriberKey,
       startedAt,
       endedAt: null,
       status: "active",
@@ -233,6 +232,10 @@ export function calculateCharge(plan, startedAt, endedAt, usage = { uploadBytes:
   return endedAt === startedAt ? 0 : normalized.priceMinor;
 }
 
+function clientFingerprint(identity) {
+  return [identity.macAddress, identity.username, identity.ipAddress].filter(Boolean).join("|");
+}
+
 function sameIdentity(a, b) {
   if (a.macAddress && b.macAddress) return a.macAddress === b.macAddress;
   if (a.username && b.username) return a.username === b.username;
@@ -263,6 +266,7 @@ export const WIFI_BILLING_CAPABILITIES = Object.freeze([
   "simultaneous-device-limits",
   "provider-neutral-adapter-registry",
   "mac-username-ip-client-identity",
+  "subscriber-device-accounting",
   "fail-closed-validation",
   "automatic-session-expiry"
 ]);
