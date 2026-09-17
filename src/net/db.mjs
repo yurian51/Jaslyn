@@ -3,7 +3,13 @@ let poolPromise;
 export async function getPool() {
   if (!process.env.DATABASE_URL) return null;
   if (!poolPromise) {
-    poolPromise = import("pg").then(({ Pool }) => new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.JASLYN_DB_POOL_MAX || 10), idleTimeoutMillis: 30000, connectionTimeoutMillis: 5000, ssl: process.env.DATABASE_SSL === "disable" ? false : { rejectUnauthorized: false } }));
+    poolPromise = import("pg").then(({ Pool }) => {
+      const ssl = process.env.DATABASE_SSL === "disable" ? false : {
+        rejectUnauthorized: process.env.DATABASE_SSL_VERIFY !== "0",
+        ...(process.env.DATABASE_CA_CERT ? { ca: process.env.DATABASE_CA_CERT } : {}),
+      };
+      return new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.JASLYN_DB_POOL_MAX || 10), idleTimeoutMillis: 30000, connectionTimeoutMillis: 5000, ssl });
+    });
   }
   return poolPromise;
 }
