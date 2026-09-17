@@ -1,6 +1,7 @@
 import { MikroTikRestProvider } from "./providers/mikrotik-rest.mjs";
 import { compileNetworkPolicy, compileRadiusMikrotik, normalizePlan } from "./policy.mjs";
 import { reconcilePaymentAccess } from "./reconcile.mjs";
+import { databaseHealth } from "./db.mjs";
 
 function env(name) {
   const value = process.env[name];
@@ -9,8 +10,9 @@ function env(name) {
 
 export function getNetworkRuntime() {
   const providerConfigured = Boolean(env("JASLYN_MIKROTIK_URL") && env("JASLYN_MIKROTIK_USERNAME") && env("JASLYN_MIKROTIK_PASSWORD"));
+  const databaseConfigured = Boolean(env("DATABASE_URL"));
   return {
-    configured: providerConfigured,
+    configured: providerConfigured || databaseConfigured,
     provider: providerConfigured ? "mikrotik-rest" : null,
     capabilities: {
       policyCompiler: true,
@@ -19,14 +21,15 @@ export function getNetworkRuntime() {
       hotspotSessions: providerConfigured,
       networkCommands: providerConfigured,
       radiusTransport: false,
-      persistentBilling: false,
+      persistentBilling: databaseConfigured,
+      transactionalDatabase: databaseConfigured,
     },
   };
 }
 
 export async function checkNetworkHealth() {
   const runtime = getNetworkRuntime();
-  if (!runtime.configured) return { ok: false, configured: false, provider: null, error: "MikroTik REST credentials are not configured." };
+  if (!runtime.capabilities.mikrotikHealth) return { ok: false, configured: false, provider: null, error: "MikroTik REST credentials are not configured." };
   const provider = new MikroTikRestProvider({
     baseUrl: env("JASLYN_MIKROTIK_URL"),
     username: env("JASLYN_MIKROTIK_USERNAME"),
@@ -34,6 +37,8 @@ export async function checkNetworkHealth() {
   });
   return { configured: true, ...(await provider.health()) };
 }
+
+export { databaseHealth };
 
 export function compilePlan(plan) {
   const policy = compileNetworkPolicy(normalizePlan(plan));
