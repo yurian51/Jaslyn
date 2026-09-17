@@ -68,9 +68,32 @@ export function createCommand(input) {
 }
 
 export function applyCommandResult(command, result) {
+  if (!command?.status || !result) throw new Error("command and result are required");
   const now = new Date().toISOString();
+  const attempts = command.attempts + 1;
+
   if (result.accepted === true) {
-    return { ...command, status: "ACCEPTED", response: result.response ?? null, attempts: command.attempts + 1, updatedAt: now };
+    let status = command.status;
+    if (command.status === "SENT") status = transition("command", command.status, "ACCEPTED");
+    else if (command.status === "ACCEPTED") status = transition("command", command.status, "EXECUTED");
+    else if (command.status === "EXECUTED" && result.verified === true) status = transition("command", command.status, "VERIFIED");
+    return {
+      ...command,
+      status,
+      response: result.response ?? null,
+      verification: result.verified === true ? (result.verification ?? { verified: true }) : command.verification,
+      attempts,
+      updatedAt: now,
+    };
   }
-  return { ...command, status: result.retryable ? "RETRYING" : "FAILED", response: result.response ?? null, error: result.error ?? "Provider rejected command", attempts: command.attempts + 1, updatedAt: now };
+
+  if (command.status === "VERIFIED" || command.status === "ABANDONED") throw new Error(`Cannot apply provider failure to command in ${command.status}`);
+  return {
+    ...command,
+    status: result.retryable ? transition("command", command.status, "RETRYING") : transition("command", command.status, "FAILED"),
+    response: result.response ?? null,
+    error: result.error ?? "Provider rejected command",
+    attempts,
+    updatedAt: now,
+  };
 }
