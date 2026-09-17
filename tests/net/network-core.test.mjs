@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { transition, createCommand, applyCommandResult, deriveEntitlement } from "../../src/net/state.mjs";
 import { compileNetworkPolicy, compileRadiusMikrotik } from "../../src/net/policy.mjs";
 import { reconcilePaymentAccess, reconcileDesiredActual } from "../../src/net/reconcile.mjs";
+import { activationRequiresNetworkVerification } from "../../src/net/lifecycle.mjs";
 
 test("payment lifecycle rejects invalid jumps", () => {
   assert.equal(transition("payment", "INITIATED", "PENDING"), "PENDING");
@@ -15,6 +16,18 @@ test("command lifecycle records retryable provider failure", () => {
   const result = applyCommandResult(sent, { accepted: false, retryable: true, error: "timeout" });
   assert.equal(result.status, "RETRYING");
   assert.equal(result.attempts, 1);
+});
+
+test("command lifecycle does not equate provider acceptance with verification", () => {
+  const command = { ...createCommand({ commandId: "cmd-2", actor: "operator-1", target: "session-2" }), status: "SENT" };
+  const accepted = applyCommandResult(command, { accepted: true, response: { status: 200 } });
+  assert.equal(accepted.status, "ACCEPTED");
+  const executed = applyCommandResult(accepted, { accepted: true, response: { applied: true } });
+  assert.equal(executed.status, "EXECUTED");
+  assert.equal(applyCommandResult(executed, { accepted: true }).status, "EXECUTED");
+  const verified = applyCommandResult(executed, { accepted: true, verified: true, verification: { sessionGone: true } });
+  assert.equal(verified.status, "VERIFIED");
+  assert.deepEqual(verified.verification, { sessionGone: true });
 });
 
 test("entitlement requires both verified payment and active subscription", () => {
@@ -58,4 +71,9 @@ test("configuration drift is explicit and auditable", () => {
   const result = reconcileDesiredActual({ rateMbps: 10, vlan: 20 }, { rateMbps: 5, vlan: 20 });
   assert.equal(result.driftDetected, true);
   assert.deepEqual(result.drift[0], { field: "rateMbps", desired: 10, actual: 5 });
+});
+
+test("verified payment activation explicitly stops before network application", () => {
+  assert.equal(activationRequiresNetworkVerification({ networkState: "PENDING_NETWORK_APPLY", authorization: { state: "PENDING" } }), true);
+  assert.equal(activationRequiresNetworkVerification({ networkState: "VERIFIED", authorization: { state: "ACTIVE" } }), false);
 });
