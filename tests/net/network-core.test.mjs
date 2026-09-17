@@ -3,11 +3,18 @@ import assert from "node:assert/strict";
 import { transition, createCommand, applyCommandResult, deriveEntitlement } from "../../src/net/state.mjs";
 import { compileNetworkPolicy, compileRadiusMikrotik } from "../../src/net/policy.mjs";
 import { reconcilePaymentAccess, reconcileDesiredActual } from "../../src/net/reconcile.mjs";
+import { mergePaymentState } from "../../src/net/payments.mjs";
 import { activationRequiresNetworkVerification } from "../../src/net/lifecycle.mjs";
 
 test("payment lifecycle rejects invalid jumps", () => {
   assert.equal(transition("payment", "INITIATED", "PENDING"), "PENDING");
   assert.throws(() => transition("payment", "INITIATED", "SETTLED"), /Invalid payment transition/);
+});
+
+test("payment callbacks advance monotonically and ignore duplicate state", () => {
+  assert.deepEqual(mergePaymentState({ status: "PENDING" }, { status: "VERIFIED" }), { state: "VERIFIED", changed: true });
+  assert.deepEqual(mergePaymentState({ status: "VERIFIED" }, { status: "VERIFIED" }), { state: "VERIFIED", changed: false });
+  assert.throws(() => mergePaymentState({ status: "SETTLED" }, { status: "PENDING" }), /Invalid payment transition/);
 });
 
 test("command lifecycle records retryable provider failure", () => {
