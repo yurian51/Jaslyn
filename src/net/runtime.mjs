@@ -17,6 +17,8 @@ export function getNetworkRuntime() {
     capabilities: {
       policyCompiler: true,
       reconciliation: true,
+      durableAuthorization: databaseConfigured,
+      paymentActivationBoundary: Boolean(databaseConfigured && env("JASLYN_PAYMENT_ACTIVATION_KEY")),
       mikrotikHealth: providerConfigured,
       hotspotSessions: providerConfigured,
       networkCommands: providerConfigured,
