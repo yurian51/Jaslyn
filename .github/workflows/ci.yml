@@ -31,7 +31,7 @@ jobs:
       - name: JavaScript boundary audit
         run: npm run language:audit
       - name: JavaScript syntax validation
-        run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js && node --check src/net/state.mjs && node --check src/net/policy.mjs && node --check src/net/reconcile.mjs && node --check src/net/runtime.mjs && node --check src/net/db.mjs && node --check src/net/accounting.mjs && node --check src/net/payments.mjs && node --check src/net/auth.mjs && node --check src/net/providers/mikrotik-rest.mjs
+        run: node --check src/index.mjs && node --check src/bridge/python-runner.mjs && node --check app/api/chat/route.js && node --check src/net/state.mjs && node --check src/net/policy.mjs && node --check src/net/reconcile.mjs && node --check src/net/runtime.mjs && node --check src/net/db.mjs && node --check src/net/accounting.mjs && node --check src/net/payments.mjs && node --check src/net/auth.mjs && node --check src/net/lifecycle.mjs && node --check src/net/providers/mikrotik-rest.mjs && node --check app/api/net/payments/activate/route.js
       - name: Build
         run: npm run build
       - name: Tests
