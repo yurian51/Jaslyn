@@ -27,7 +27,7 @@ export async function activateVerifiedPayment({ paymentId, correlationId = null,
 
   return withTransaction(async (client) => {
     const paymentResult = await client.query(
-      `select id, organization_id, customer_id, subscription_id, amount_minor, currency, status
+      `select id, organization_id, customer_id, subscription_id, amount_minor, currency, status, activation_applied_at
        from net_payments
        where id = $1
        for update`,
@@ -50,6 +50,22 @@ export async function activateVerifiedPayment({ paymentId, correlationId = null,
     const subscription = subscriptionResult.rows[0];
     if (!subscription) throw new Error("Subscription not found for payment customer");
     if (subscription.organization_id !== payment.organization_id) throw new Error("Payment organization mismatch");
+
+    if (payment.activation_applied_at) {
+      const authorizationResult = await client.query(
+        `select id, subscription_id, state, policy, policy_version, desired_at, applied_at, last_verified_at
+         from net_authorizations where subscription_id = $1`,
+        [subscription.id],
+      );
+      const authorization = authorizationResult.rows[0] ?? null;
+      return {
+        paymentId: payment.id,
+        idempotent: true,
+        subscription,
+        authorization,
+        networkState: authorization?.state === "ACTIVE" ? "NETWORK_AUTHORIZED" : "PENDING_NETWORK_APPLY",
+      };
+    }
 
     assertActivationPayment(payment, subscription);
 
@@ -131,8 +147,14 @@ export async function activateVerifiedPayment({ paymentId, correlationId = null,
       ],
     );
 
+    await client.query(
+      `update net_payments set activation_applied_at = $2::timestamptz, updated_at = now() where id = $1`,
+      [payment.id, activationTime],
+    );
+
     return {
       paymentId: payment.id,
+      idempotent: false,
       subscription: updatedSubscription.rows[0],
       authorization: authorization.rows[0],
       event: event.rows[0],
