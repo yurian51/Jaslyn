@@ -25,6 +25,19 @@
 - Secrets never belong in source control.
 - A successful response must be grounded in a verification result.
 
-## Future production boundaries
+## Jaslyn Net boundary
 
-The first implementation uses in-memory stores. PostgreSQL, Redis, queues, WebSockets, provider adapters, authentication, and external tool connectors should implement the same contracts rather than leak infrastructure concerns into the agent core.
+Jaslyn Net is implemented as a modular network operating surface beside the agent core. Its current boundaries are:
+
+- Commercial state: plans, payments and subscriptions.
+- Identity/AAA state: customers, devices and sessions.
+- Network control: vendor-neutral policies plus provider adapters.
+- Observability: health, telemetry and accounting evidence.
+- Reconciliation: deterministic comparison of financial, entitlement and network state.
+- Audit: durable commands/events and operator actions.
+
+The durable data model is PostgreSQL-oriented and is defined under `db/migrations/`. The runtime uses transactional boundaries in `src/net/db.mjs` and does not silently fall back to fabricated production data when `DATABASE_URL` is absent.
+
+MikroTik RouterOS v7 REST is an optional real provider integration. Network commands require a separate `JASLYN_NET_COMMAND_KEY`, and destructive HotSpot disconnects are verified against the router after execution.
+
+RADIUS transport is intentionally not marked as configured until an actual RADIUS service and credentials are supplied. The policy compiler can produce verified MikroTik/RADIUS attributes without coupling commercial plans to vendor-specific storage.
