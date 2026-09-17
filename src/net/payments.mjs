@@ -44,7 +44,7 @@ export async function recordPaymentEvent(input) {
       return result.rows[0];
     }
 
-    if (existing.organization_id !== payment.organizationId || existing.customer_id !== payment.customerId || existing.amount_minor !== payment.amountMinor || existing.currency !== payment.currency) {
+    if (existing.organization_id !== payment.organizationId || existing.customer_id !== payment.customerId || String(existing.amount_minor) !== String(payment.amountMinor) || existing.currency !== payment.currency) {
       throw new Error("Payment identity or amount mismatch for an existing provider transaction");
     }
     if (existing.subscription_id && payment.subscriptionId && existing.subscription_id !== payment.subscriptionId) {
