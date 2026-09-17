@@ -156,19 +156,18 @@ export default function JaslynNetDashboard() {
             <article className={`${styles.card} ${styles.topologyCard}`}>
               <div className={styles.cardHead}><div><span className={styles.cardEyebrow}>NETWORK STATE</span><h2>Network Map & Topology</h2></div><div className={styles.tabs}><button className={styles.tabActive}>Topology</button><button>Map</button><button>List</button></div></div>
               <div className={styles.topology}>
-                <div className={styles.topologyLine line1="" />
-                <div className={styles.node internet}><b>Internet</b><span>UPLINK</span></div>
-                <div className={styles.node router}><WifiMark /><b>Gateway</b><span>NETWORK DEVICE</span></div>
-                <div className={styles.node siteA}><i /> <b>Site</b><span>LIVE DATA REQUIRED</span></div>
-                <div className={styles.node siteB}><i /> <b>Access Point</b><span>LIVE DATA REQUIRED</span></div>
-                <div className={styles.node client}><i /> <b>Clients</b><span>SESSION EVIDENCE REQUIRED</span></div>
+                <div className={styles.node + " " + styles.internet}><b>Internet</b><span>UPLINK</span></div>
+                <div className={styles.node + " " + styles.router}><WifiMark /><b>Gateway</b><span>NETWORK DEVICE</span></div>
+                <div className={styles.node + " " + styles.siteA}><i /> <b>Site</b><span>LIVE DATA REQUIRED</span></div>
+                <div className={styles.node + " " + styles.siteB}><i /> <b>Access Point</b><span>LIVE DATA REQUIRED</span></div>
+                <div className={styles.node + " " + styles.client}><i /> <b>Clients</b><span>SESSION EVIDENCE REQUIRED</span></div>
                 <div className={styles.topologyHint}><i /> No network telemetry has been connected yet. The UI intentionally refuses to invent device state.</div>
               </div>
             </article>
 
             <article className={`${styles.card} ${styles.trafficCard}`}>
               <div className={styles.cardHead}><div><span className={styles.cardEyebrow}>DATA PLANE</span><h2>Traffic & Bandwidth</h2></div><select><option>Live window</option><option>Last 24 hours</option></select></div>
-              <div className={styles.emptyChart}><div className={styles.chartGrid}><span /><span /><span /><span /></div><div className={styles.chartMessage}><b>Awaiting telemetry</b><small>Download / upload measurements will appear here when a verified network telemetry source is connected.</small></div></div>
+              <div className={styles.emptyChart}><div className={styles.chartMessage}><b>Awaiting telemetry</b><small>Download / upload measurements will appear here when a verified network telemetry source is connected.</small></div></div>
               <div className={styles.legend}><span><i className={styles.cyanDot} /> Download</span><span><i className={styles.violetDot} /> Upload</span><span><i className={styles.greenDot} /> Sessions</span></div>
             </article>
 
