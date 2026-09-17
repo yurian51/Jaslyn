@@ -15,8 +15,12 @@ alter table net_devices
 alter table net_devices
   add column if not exists role text not null default 'GATEWAY' check (role in ('GATEWAY','ROUTER','SWITCH','ACCESS_POINT','RADIUS','OTHER'));
 
+alter table net_payments
+  add column if not exists activation_applied_at timestamptz;
+
 create index if not exists idx_net_networks_site_status on net_networks(site_id, status);
 create index if not exists idx_net_devices_network_role on net_devices(network_id, role, state);
+create index if not exists idx_net_payments_activation on net_payments(activation_applied_at, status);
 
 create table if not exists net_authorizations (
   id uuid primary key default gen_random_uuid(),
