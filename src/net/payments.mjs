@@ -1,4 +1,5 @@
 import { withTransaction } from "./db.mjs";
+import { transition } from "./state.mjs";
 
 const statuses = new Set(["INITIATED", "PENDING", "VERIFIED", "SETTLED", "FAILED", "REVERSED", "REFUNDED"]);
 
@@ -15,18 +16,54 @@ export function normalizePaymentEvent(input) {
   return { organizationId: String(input.organizationId), provider: String(input.provider), providerTransactionId: String(input.providerTransactionId), customerId: String(input.customerId), subscriptionId: input.subscriptionId ? String(input.subscriptionId) : null, amountMinor, currency, status, providerReference: input.providerReference ? String(input.providerReference) : null, receivedAt: receivedAt.toISOString() };
 }
 
+export function mergePaymentState(current, incoming) {
+  if (!current) return { state: incoming.status, changed: true };
+  if (current.status === incoming.status) return { state: current.status, changed: false };
+  return { state: transition("payment", current.status, incoming.status), changed: true };
+}
+
 export async function recordPaymentEvent(input) {
   const payment = normalizePaymentEvent(input);
   return withTransaction(async (client) => {
+    const existingResult = await client.query(
+      `select id, organization_id, customer_id, subscription_id, amount_minor, currency, status, provider_reference, received_at, verified_at
+       from net_payments
+       where provider = $1 and provider_transaction_id = $2
+       for update`,
+      [payment.provider, payment.providerTransactionId],
+    );
+    const existing = existingResult.rows[0];
+
+    if (!existing) {
+      const result = await client.query(
+        `insert into net_payments (organization_id, customer_id, subscription_id, provider, provider_transaction_id, amount_minor, currency, status, provider_reference, received_at, verified_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,case when $8 in ('VERIFIED','SETTLED') then $10::timestamptz else null end)
+         returning id, organization_id, provider, provider_transaction_id, amount_minor, currency, status, received_at, verified_at`,
+        [payment.organizationId, payment.customerId, payment.subscriptionId, payment.provider, payment.providerTransactionId, payment.amountMinor, payment.currency, payment.status, payment.providerReference, payment.receivedAt],
+      );
+      return result.rows[0];
+    }
+
+    if (existing.organization_id !== payment.organizationId || existing.customer_id !== payment.customerId || existing.amount_minor !== payment.amountMinor || existing.currency !== payment.currency) {
+      throw new Error("Payment identity or amount mismatch for an existing provider transaction");
+    }
+    if (existing.subscription_id && payment.subscriptionId && existing.subscription_id !== payment.subscriptionId) {
+      throw new Error("Payment subscription mismatch for an existing provider transaction");
+    }
+
+    const merged = mergePaymentState(existing, payment);
+    if (!merged.changed) return existing;
+
     const result = await client.query(
-      `insert into net_payments (organization_id, customer_id, subscription_id, provider, provider_transaction_id, amount_minor, currency, status, provider_reference, received_at, verified_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,case when $8 in ('VERIFIED','SETTLED') then $10::timestamptz else null end)
-       on conflict (provider, provider_transaction_id) do update set
-         provider_reference=coalesce(excluded.provider_reference, net_payments.provider_reference),
-         received_at=least(coalesce(net_payments.received_at, excluded.received_at), excluded.received_at),
-         updated_at=now()
+      `update net_payments
+       set status = $2,
+           provider_reference = coalesce($3, provider_reference),
+           received_at = least(coalesce(received_at, $4::timestamptz), $4::timestamptz),
+           verified_at = case when $2 in ('VERIFIED','SETTLED') then coalesce(verified_at, $4::timestamptz) else verified_at end,
+           updated_at = now()
+       where id = $1
        returning id, organization_id, provider, provider_transaction_id, amount_minor, currency, status, received_at, verified_at`,
-      [payment.organizationId, payment.customerId, payment.subscriptionId, payment.provider, payment.providerTransactionId, payment.amountMinor, payment.currency, payment.status, payment.providerReference, payment.receivedAt]
+      [existing.id, merged.state, payment.providerReference, payment.receivedAt],
     );
     return result.rows[0];
   });
