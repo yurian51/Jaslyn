@@ -1,9 +1,16 @@
 import { withTransaction } from "./db.mjs";
 
 const statuses = new Set(["Start", "Interim-Update", "Stop"]);
+const counter = (value, name) => {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be a finite non-negative number`);
+  return n;
+};
 
 export function normalizeAccounting(input) {
   if (!input?.nasIdentifier || !input?.acctSessionId || !statuses.has(input.acctStatusType)) throw new Error("nasIdentifier, acctSessionId and a valid acctStatusType are required");
+  const receivedAt = input.receivedAt ? new Date(input.receivedAt) : new Date();
+  if (Number.isNaN(receivedAt.getTime())) throw new Error("receivedAt must be a valid timestamp");
   return {
     nasIdentifier: String(input.nasIdentifier),
     acctSessionId: String(input.acctSessionId),
@@ -11,18 +18,18 @@ export function normalizeAccounting(input) {
     macAddress: input.macAddress ? String(input.macAddress) : null,
     ipAddress: input.ipAddress ? String(input.ipAddress) : null,
     acctStatusType: input.acctStatusType,
-    sessionTime: Number.isFinite(Number(input.sessionTime)) ? Number(input.sessionTime) : null,
-    inputOctets: Math.max(0, Number(input.inputOctets || 0)),
-    outputOctets: Math.max(0, Number(input.outputOctets || 0)),
+    sessionTime: input.sessionTime == null ? null : counter(input.sessionTime, "sessionTime"),
+    inputOctets: counter(input.inputOctets, "inputOctets"),
+    outputOctets: counter(input.outputOctets, "outputOctets"),
     terminationCause: input.terminationCause ? String(input.terminationCause) : null,
-    receivedAt: input.receivedAt ? new Date(input.receivedAt).toISOString() : new Date().toISOString(),
+    receivedAt: receivedAt.toISOString(),
   };
 }
 
 export async function persistAccounting(input) {
   const event = normalizeAccounting(input);
   return withTransaction(async (client) => {
-    const state = event.acctStatusType === "Start" ? "ACTIVE" : event.acctStatusType === "Stop" ? "TERMINATED" : "ACTIVE";
+    const state = event.acctStatusType === "Stop" ? "TERMINATED" : "ACTIVE";
     const result = await client.query(
       `insert into net_sessions (nas_identifier, acct_session_id, username, mac_address, ip_address, state, started_at, last_accounting_at, ended_at, input_octets, output_octets, termination_cause)
        values ($1,$2,$3,$4,$5::inet,$6,case when $7 = 'Start' then $8::timestamptz else null end,$8::timestamptz,case when $7 = 'Stop' then $8::timestamptz else null end,$9,$10,$11)
