@@ -13,9 +13,12 @@
     "benchmark:health": "node scripts/benchmark-health.mjs",
     "benchmark:test": "node --test tests/benchmark/*.test.mjs",
     "benchmark:selftest": "node scripts/benchmark-selftest.mjs",
-    "benchmark:security": "node --test tests/benchmark/security-regression.test.mjs"
+    "benchmark:security": "node --test tests/benchmark/security-regression.test.mjs",
+    "radius:accounting": "node scripts/radius-accounting-server.mjs"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "next": "^15.5.0",
     "pg": "^8.16.3",
