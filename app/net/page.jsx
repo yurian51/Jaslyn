@@ -98,7 +98,7 @@ export default function JaslynNetDashboard() {
   const systemOnline = Boolean(health?.network?.ok || health?.database?.ok);
   const statusRows = [
     ["Database", evidenceState(health, "database")],
-    ["RADIUS / AAA", "Not configured"],
+    ["RADIUS / AAA", health?.runtime?.capabilities?.radiusAccountingTransport ? "Accounting transport" : "Not configured"],
     ["Payment Gateway", "Not configured"],
     ["Network API", evidenceState(health, "network")],
     ["Captive Portal", health?.runtime?.capabilities?.hotspotSessions ? "Connected" : "Not configured"],
