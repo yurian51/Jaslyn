@@ -1,7 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
-
 const POINTS = [
   [8, 20], [20, 10], [34, 18], [49, 8], [65, 17], [82, 11], [93, 27],
   [13, 45], [28, 37], [44, 48], [61, 36], [77, 45], [89, 55],
@@ -20,8 +18,7 @@ const EDGES = [
 ];
 
 export default function JaslynPattern({ variant = "mesh", intensity = "normal", active = true }) {
-  const seed = useMemo(() => Math.floor(Math.random() * 4), []);
-  const edges = variant === "constellation" ? EDGES.filter((_, i) => (i + seed) % 2 === 0) : EDGES;
+  const edges = variant === "constellation" ? EDGES.filter((_, i) => i % 2 === 0) : EDGES;
 
   return (
     <div
