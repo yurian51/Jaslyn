@@ -62,7 +62,7 @@ For single-host self-hosted deployments, the local JSON stores use atomic file o
 
 ## RADIUS accounting transport
 
-Jaslyn Net can receive real RADIUS Accounting-Request packets on UDP/1813 and feed the existing accounting/session persistence path. The transport authenticates each NAS by source IP and shared secret before persistence, and returns Accounting-Response only after the accounting write succeeds. This follows the RADIUS Accounting request/response model defined by RFC 2866. citeturn5search0
+Jaslyn Net can receive real RADIUS Accounting-Request packets on UDP/1813 and feed the existing accounting/session persistence path. The transport authenticates each NAS by source IP and shared secret before persistence, and returns Accounting-Response only after the accounting write succeeds. This follows the RADIUS Accounting request/response model defined by RFC 2866.
 
 Configure an explicit client allowlist before starting the listener:
 
