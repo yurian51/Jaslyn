@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import styles from "./net.module.css";
+import JaslynPattern from "./patterns";
 
 const nav = [
   ["overview", "Overview", "⌂"],
@@ -135,6 +136,11 @@ export default function JaslynNetDashboard() {
 
       {menuOpen && <button className={styles.scrim} aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
       <section className={styles.main}>
+        <JaslynPattern
+          variant={active === "network" || active === "hotspot" ? "waves" : active === "monitoring" || active === "sessions" ? "pulse" : active === "devices" || active === "aaa" ? "circuit" : active === "reports" || active === "analytics" ? "constellation" : "mesh"}
+          intensity={systemOnline ? "normal" : "low"}
+          active={systemOnline}
+        />
         <header className={styles.topbar}>
           <button className={styles.mobileMenu} onClick={() => setMenuOpen(true)} aria-label="Open navigation">☰</button>
           <div className={styles.search}><span>⌕</span><input placeholder="Search customers, devices, payments, sessions…" /><kbd>Ctrl K</kbd></div>
