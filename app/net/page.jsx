@@ -137,7 +137,7 @@ export default function JaslynNetDashboard() {
       {menuOpen && <button className={styles.scrim} aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
       <section className={styles.main}>
         <JaslynPattern
-          variant={active === "network" || active === "hotspot" ? "waves" : active === "monitoring" || active === "sessions" ? "pulse" : active === "devices" || active === "aaa" ? "circuit" : active === "reports" || active === "analytics" ? "constellation" : "mesh"}
+          variant={active === "network" || active === "hotspot" ? "waves" : active === "monitoring" || active === "sessions" ? "pulse" : active === "devices" || active === "aaa" ? "circuit" : active === "reports" ? "constellation" : "mesh"}
           intensity={systemOnline ? "normal" : "low"}
           active={systemOnline}
         />
