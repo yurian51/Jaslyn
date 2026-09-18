@@ -1,8 +1,10 @@
 import { UnsupportedCapabilityError } from "./contract.mjs";
 import { MikroTikRestProvider } from "./mikrotik-rest.mjs";
+import { OmadaOpenApiProvider } from "./omada-openapi.mjs";
 
 const PROVIDER_TYPES = Object.freeze({
   "mikrotik-rest": MikroTikRestProvider,
+  "omada-openapi": OmadaOpenApiProvider,
 });
 
 export function listRegisteredProviders() {
