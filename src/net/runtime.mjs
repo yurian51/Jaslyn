@@ -12,16 +12,39 @@ function mikrotikConfigured() {
   return Boolean(env("JASLYN_MIKROTIK_URL") && env("JASLYN_MIKROTIK_USERNAME") && env("JASLYN_MIKROTIK_PASSWORD"));
 }
 
-export function getNetworkProvider() {
-  if (!mikrotikConfigured()) return null;
-  return createNetworkProvider({
-    type: "mikrotik-rest",
-    baseUrl: env("JASLYN_MIKROTIK_URL"),
-    username: env("JASLYN_MIKROTIK_USERNAME"),
-    password: env("JASLYN_MIKROTIK_PASSWORD"),
-  });
+function omadaConfigured() {
+  return Boolean(env("JASLYN_OMADA_URL") && env("JASLYN_OMADA_ID") && env("JASLYN_OMADA_CLIENT_ID") && env("JASLYN_OMADA_CLIENT_SECRET"));
 }
 
+function selectedProviderType() {
+  const requested = env("JASLYN_NETWORK_PROVIDER");
+  if (requested) return requested;
+  if (mikrotikConfigured()) return "mikrotik-rest";
+  if (omadaConfigured()) return "omada-openapi";
+  return null;
+}
+
+export function getNetworkProvider() {
+  const type = selectedProviderType();
+  if (type === "mikrotik-rest" && mikrotikConfigured()) {
+    return createNetworkProvider({
+      type,
+      baseUrl: env("JASLYN_MIKROTIK_URL"),
+      username: env("JASLYN_MIKROTIK_USERNAME"),
+      password: env("JASLYN_MIKROTIK_PASSWORD"),
+    });
+  }
+  if (type === "omada-openapi" && omadaConfigured()) {
+    return createNetworkProvider({
+      type,
+      baseUrl: env("JASLYN_OMADA_URL"),
+      omadacId: env("JASLYN_OMADA_ID"),
+      clientId: env("JASLYN_OMADA_CLIENT_ID"),
+      clientSecret: env("JASLYN_OMADA_CLIENT_SECRET"),
+    });
+  }
+  return null;
+}
 export function getNetworkRuntime() {
   const provider = getNetworkProvider();
   const databaseConfigured = Boolean(env("DATABASE_URL"));
