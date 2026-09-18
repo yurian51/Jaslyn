@@ -45,6 +45,7 @@ export function getNetworkRuntime() {
       telemetry: Boolean(provider?.getCapabilities?.().metrics),
       networkCommands: Boolean(provider?.getCapabilities?.().disconnect),
       radiusTransport: false,
+      radiusAccountingTransport: Boolean(env("JASLYN_RADIUS_CLIENTS_JSON")),
       persistentBilling: databaseConfigured,
       transactionalDatabase: databaseConfigured,
     },
