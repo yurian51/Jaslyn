@@ -59,6 +59,8 @@ export default function JaslynNetDashboard() {
   const [now, setNow] = useState(new Date());
   const [live, setLive] = useState(null);
   const [health, setHealth] = useState(null);
+  const [connectionState, setConnectionState] = useState("checking");
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -67,35 +69,111 @@ export default function JaslynNetDashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    const refresh = async () => {
-      const [overviewResponse, healthResponse] = await Promise.all([
-        fetch("/api/net/overview", { cache: "no-store" }),
-        fetch("/api/net/health", { cache: "no-store" }),
-      ]);
-      const overview = overviewResponse.ok || overviewResponse.status === 503 || overviewResponse.status === 502 ? await overviewResponse.json() : null;
-      const healthData = healthResponse.ok ? await healthResponse.json() : null;
-      if (!cancelled) {
-        setLive(overview);
-        setHealth(healthData);
+    let controller = null;
+    let timer = null;
+
+    const loadCachedState = () => {
+      try {
+        const cached = window.localStorage.getItem("jaslyn-net:last-state");
+        if (!cached) return;
+        const parsed = JSON.parse(cached);
+        if (parsed?.live) setLive(parsed.live);
+        if (parsed?.health) setHealth(parsed.health);
+        if (parsed?.savedAt) setLastSyncedAt(new Date(parsed.savedAt));
+        setConnectionState("offline-cache");
+      } catch {
+        // Corrupt local state is disposable. The authoritative API remains the source of truth.
       }
     };
-    refresh().catch(() => {
-      if (!cancelled) {
-        setLive(null);
-        setHealth(null);
+
+    const refresh = async () => {
+      if (cancelled || document.hidden || !navigator.onLine) return;
+      controller?.abort();
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      try {
+        const [overviewResponse, healthResponse] = await Promise.all([
+          fetch("/api/net/overview", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/net/health", { cache: "no-store", signal: controller.signal }),
+        ]);
+
+        const overview = overviewResponse.ok || overviewResponse.status === 503 || overviewResponse.status === 502
+          ? await overviewResponse.json()
+          : null;
+        const healthData = healthResponse.ok ? await healthResponse.json() : null;
+
+        if (cancelled) return;
+
+        if (overview) setLive(overview);
+        if (healthData) setHealth(healthData);
+
+        const successful = Boolean(overview || healthData);
+        if (successful) {
+          const synced = new Date();
+          setLastSyncedAt(synced);
+          setConnectionState(overviewResponse.ok && healthResponse.ok ? "online" : "degraded");
+          try {
+            window.localStorage.setItem("jaslyn-net:last-state", JSON.stringify({
+              live: overview,
+              health: healthData,
+              savedAt: synced.toISOString(),
+            }));
+          } catch {
+            // Storage is an optimization, not a dependency.
+          }
+        } else {
+          setConnectionState("degraded");
+        }
+      } catch (error) {
+        if (cancelled || error?.name === "AbortError") return;
+        setConnectionState(navigator.onLine ? "degraded" : "offline-cache");
+      } finally {
+        clearTimeout(timeout);
       }
-    });
-    const interval = setInterval(() => refresh().catch(() => {}), 15000);
+    };
+
+    const schedule = () => {
+      clearTimeout(timer);
+      if (cancelled) return;
+      const delay = document.hidden ? 60000 : 15000;
+      timer = setTimeout(async () => {
+        await refresh();
+        schedule();
+      }, delay);
+    };
+
+    const onOnline = () => {
+      setConnectionState("reconnecting");
+      refresh().finally(schedule);
+    };
+    const onOffline = () => setConnectionState("offline-cache");
+    const onVisibility = () => {
+      if (!document.hidden) refresh().finally(schedule);
+      else schedule();
+    };
+
+    loadCachedState();
+    refresh().finally(schedule);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      controller?.abort();
+      clearTimeout(timer);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
   const activeLabel = useMemo(() => nav.find(([id]) => id === active)?.[1] || "Overview", [active]);
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const date = now.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" });
-  const systemOnline = Boolean(health?.network?.ok || health?.database?.ok);
+  const systemOnline = connectionState !== "offline-cache" && connectionState !== "checking" && Boolean(health?.network?.ok || health?.database?.ok);
+  const stateLabel = connectionState === "online" ? "LIVE" : connectionState === "reconnecting" ? "RECONNECTING" : connectionState === "offline-cache" ? "OFFLINE CACHE" : connectionState === "degraded" ? "DEGRADED" : "CHECKING";
   const statusRows = [
     ["Database", evidenceState(health, "database")],
     ["RADIUS / AAA", "Not configured"],
@@ -148,7 +226,7 @@ export default function JaslynNetDashboard() {
             <button className={styles.siteSelect}>⌂ <span>All Sites</span> ▾</button>
             <button className={styles.iconButton}>♧</button><button className={styles.iconButton}>◐</button>
             <div className={styles.profile}><span className={styles.avatar}>Y</span><div><b>Super Admin</b><small>{date}</small></div></div>
-            <div className={styles.clock}><b>{clock}</b><span><i /> {systemOnline ? "System online" : "Awaiting sources"}</span></div>
+            <div className={styles.clock}><b>{clock}</b><span><i className={connectionState === "offline-cache" ? styles.statusOffline : connectionState === "degraded" ? styles.statusDegraded : ""} /> {stateLabel}{lastSyncedAt ? " • " + lastSyncedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span></div>
           </div>
         </header>
 
