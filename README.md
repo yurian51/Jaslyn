@@ -59,3 +59,18 @@ The protocol is OpenAI-compatible, but Jaslyn is not presented as GPT, Claude, G
 Approval is exact-action and durable. Protected actions cannot be unlocked by a generic `approve=true` request. Approved actions are claimed once, executed from the persisted action record, and written to run history. Browser/session integrations must remain behind explicitly authorized provider boundaries; credential harvesting and session scraping are not part of Jaslyn.
 
 For single-host self-hosted deployments, the local JSON stores use atomic file operations and filesystem locks. Multi-instance deployments should replace these stores with shared transactional infrastructure such as PostgreSQL/Redis.
+
+## RADIUS accounting transport
+
+Jaslyn Net can receive real RADIUS Accounting-Request packets on UDP/1813 and feed the existing accounting/session persistence path. The transport authenticates each NAS by source IP and shared secret before persistence, and returns Accounting-Response only after the accounting write succeeds. This follows the RADIUS Accounting request/response model defined by RFC 2866.
+
+Configure an explicit client allowlist before starting the listener:
+
+```bash
+export JASLYN_RADIUS_CLIENTS_JSON='[{"address":"10.0.0.1","secret":"replace-with-a-long-random-secret","nasIdentifier":"router-01"}]'
+export JASLYN_RADIUS_ACCOUNTING_HOST=0.0.0.0
+export JASLYN_RADIUS_ACCOUNTING_PORT=1813
+npm run radius:accounting
+```
+
+The listener currently accepts `Start`, `Interim-Update`, and `Stop` accounting records, verifies the Accounting-Request authenticator and Message-Authenticator when present, normalizes the session attributes, and persists them through `src/net/accounting.mjs`. It does not claim RADIUS authentication/authorization yet, so the network runtime continues to report the full `radiusTransport` capability as unavailable rather than pretending accounting transport is a complete AAA server.
