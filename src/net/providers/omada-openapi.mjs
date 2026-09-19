@@ -5,8 +5,14 @@ function asList(value) {
   return value == null ? [] : [value];
 }
 
+function providerError(message, status = null) {
+  const error = new Error(message);
+  if (status != null) error.status = status;
+  return error;
+}
+
 export class OmadaOpenApiProvider {
-  constructor({ baseUrl, omadacId, clientId, clientSecret, timeoutMs = 7000, tokenGrantType = "client_credentials" }) {
+  constructor({ baseUrl, omadacId, clientId, clientSecret, timeoutMs = 7000, tokenGrantType = "client_credentials", pageSize = 100 }) {
     if (!baseUrl || !omadacId || !clientId || !clientSecret) throw new Error("Omada Open API provider requires baseUrl, omadacId, clientId and clientSecret");
     this.name = "omada-openapi";
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -15,8 +21,10 @@ export class OmadaOpenApiProvider {
     this.clientSecret = String(clientSecret);
     this.timeoutMs = timeoutMs;
     this.tokenGrantType = tokenGrantType;
+    this.pageSize = Math.max(1, Math.min(100, Number(pageSize) || 100));
     this.accessToken = null;
     this.tokenExpiresAt = 0;
+    this.tokenPromise = null;
   }
 
   getCapabilities() {
@@ -57,9 +65,9 @@ export class OmadaOpenApiProvider {
       const text = await response.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-      if (!response.ok) throw new Error(`Omada Open API HTTP ${response.status}`);
+      if (!response.ok) throw providerError(`Omada Open API HTTP ${response.status}`, response.status);
       if (data && typeof data === "object" && data.errorCode != null && Number(data.errorCode) !== 0) {
-        throw new Error(`Omada Open API error ${data.errorCode}: ${data.msg ?? "request rejected"}`);
+        throw providerError(`Omada Open API error ${data.errorCode}: ${data.msg ?? "request rejected"}`);
       }
       return data;
     } finally {
@@ -69,16 +77,28 @@ export class OmadaOpenApiProvider {
 
   async authenticate(force = false) {
     if (!force && this.accessToken && Date.now() < this.tokenExpiresAt - 60_000) return this.accessToken;
-    const response = await this.rawRequest(`/openapi/authorize/token?grant_type=${encodeURIComponent(this.tokenGrantType)}`, {
-      method: "POST",
-      body: { client_id: this.clientId, client_secret: this.clientSecret },
+    if (this.tokenPromise) return this.tokenPromise;
+
+    this.tokenPromise = (async () => {
+      const response = await this.rawRequest(`/openapi/authorize/token?grant_type=${encodeURIComponent(this.tokenGrantType)}`, {
+        method: "POST",
+        body: {
+          omadacId: this.omadacId,
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+        },
+      });
+      const token = response?.result?.accessToken;
+      if (!token) throw new Error("Omada Open API did not return an access token");
+      const expiresIn = Number(response?.result?.expiresIn ?? 7200);
+      this.accessToken = String(token);
+      this.tokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : 7200 * 1000);
+      return this.accessToken;
+    })().finally(() => {
+      this.tokenPromise = null;
     });
-    const token = response?.result?.accessToken;
-    if (!token) throw new Error("Omada Open API did not return an access token");
-    const expiresIn = Number(response?.result?.expiresIn ?? 7200);
-    this.accessToken = String(token);
-    this.tokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : 7200 * 1000);
-    return this.accessToken;
+
+    return this.tokenPromise;
   }
 
   async request(path, options = {}, retry = true) {
@@ -86,7 +106,9 @@ export class OmadaOpenApiProvider {
     try {
       return await this.rawRequest(path, { ...options, authorization: `AccessToken=${token}` });
     } catch (error) {
-      if (retry && /401|token|auth/i.test(error instanceof Error ? error.message : String(error))) {
+      if (retry && error?.status === 401) {
+        this.accessToken = null;
+        this.tokenExpiresAt = 0;
         await this.authenticate(true);
         return this.request(path, options, false);
       }
@@ -95,18 +117,29 @@ export class OmadaOpenApiProvider {
   }
 
   async getIdentity() {
-    return this.rawRequest("/api/info");
+    return this.request("/api/info");
+  }
+
+  async getPagedData(pathFactory) {
+    const rows = [];
+    for (let page = 1; page <= 100; page += 1) {
+      const response = await this.request(pathFactory(page));
+      const pageRows = asList(response?.result?.data);
+      rows.push(...pageRows);
+      if (pageRows.length < this.pageSize) return rows;
+    }
+    throw new Error("Omada Open API pagination exceeded the 100-page safety limit");
   }
 
   async getSites() {
-    const response = await this.request(`/openapi/v1/${encodeURIComponent(this.omadacId)}/sites?page=1&pageSize=100`);
-    return asList(response?.result?.data).map((site) => ({ id: String(site.siteId ?? site.id), name: site.name ?? null, raw: site }));
+    const data = await this.getPagedData((page) => `/openapi/v1/${encodeURIComponent(this.omadacId)}/sites?page=${page}&pageSize=${this.pageSize}`);
+    return data.map((site) => ({ id: String(site.siteId ?? site.id), name: site.name ?? null, raw: site }));
   }
 
   async getDevices(siteId) {
     if (!siteId) throw new Error("Omada siteId is required for device discovery");
-    const response = await this.request(`/openapi/v1/${encodeURIComponent(this.omadacId)}/sites/${encodeURIComponent(siteId)}/devices?page=1&pageSize=100`);
-    return asList(response?.result?.data).map((device) => ({
+    const data = await this.getPagedData((page) => `/openapi/v1/${encodeURIComponent(this.omadacId)}/sites/${encodeURIComponent(siteId)}/devices?page=${page}&pageSize=${this.pageSize}`);
+    return data.map((device) => ({
       provider: this.name,
       siteId: String(siteId),
       id: device.mac ?? device.id ?? null,
