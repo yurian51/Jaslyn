@@ -11,8 +11,16 @@ function asIso(value, field) {
 
 function assertActivationPayment(payment, plan) {
   if (!VERIFIABLE_PAYMENT_STATES.has(payment.status)) throw new Error(`Payment ${payment.id} is not verified or settled`);
-  if (payment.amount_minor !== plan.price_minor) throw new Error(`Payment amount mismatch for plan ${plan.id}`);
-  if (payment.currency !== plan.currency) throw new Error(`Payment currency mismatch for plan ${plan.id}`);
+  let paymentAmount;
+  let planAmount;
+  try {
+    paymentAmount = BigInt(payment.amount_minor);
+    planAmount = BigInt(plan.price_minor);
+  } catch {
+    throw new Error(`Payment amount mismatch for plan ${plan.id}`);
+  }
+  if (paymentAmount !== planAmount) throw new Error(`Payment amount mismatch for plan ${plan.id}`);
+  if (String(payment.currency).toUpperCase() !== String(plan.currency).toUpperCase()) throw new Error(`Payment currency mismatch for plan ${plan.id}`);
 }
 
 export async function activateVerifiedPayment({ paymentId, correlationId = null, now = new Date().toISOString() }) {
