@@ -14,8 +14,8 @@ export function normalizePaymentEvent(input) {
   if (!statuses.has(status)) throw new Error(`Unsupported payment state: ${status}`);
   const receivedAt = input.receivedAt ? new Date(input.receivedAt) : new Date();
   if (Number.isNaN(receivedAt.getTime())) throw new Error("receivedAt must be a valid timestamp");
-  const correlationId = input.correlationId ? String(input.correlationId) : randomUUID();
-  if (!/^[0-9a-f-]{36}$/i.test(correlationId)) throw new Error("correlationId must be a UUID");
+  const correlationId = input.correlationId ? String(input.correlationId) : null;
+  if (correlationId && !/^[0-9a-f-]{36}$/i.test(correlationId)) throw new Error("correlationId must be a UUID");
   return { organizationId: String(input.organizationId), provider: String(input.provider), providerTransactionId: String(input.providerTransactionId), customerId: String(input.customerId), subscriptionId: input.subscriptionId ? String(input.subscriptionId) : null, amountMinor, currency, status, providerReference: input.providerReference ? String(input.providerReference) : null, receivedAt: receivedAt.toISOString(), correlationId };
 }
 
@@ -38,11 +38,20 @@ export async function recordPaymentEvent(input) {
     const existing = existingResult.rows[0];
 
     if (!existing) {
+      let correlationId = payment.correlationId;
+      if (!correlationId && payment.subscriptionId) {
+        const subscriptionResult = await client.query(
+          `select correlation_id from net_subscriptions where id = $1 and customer_id = $2 for update`,
+          [payment.subscriptionId, payment.customerId],
+        );
+        correlationId = subscriptionResult.rows[0]?.correlation_id ?? null;
+      }
+      correlationId ||= randomUUID();
       const result = await client.query(
         `insert into net_payments (organization_id, customer_id, subscription_id, provider, provider_transaction_id, amount_minor, currency, status, provider_reference, received_at, verified_at, correlation_id)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,case when $8 in ('VERIFIED','SETTLED') then $10::timestamptz else null end,$11)
          returning id, organization_id, customer_id, subscription_id, provider, provider_transaction_id, amount_minor, currency, status, provider_reference, received_at, verified_at, correlation_id`,
-        [payment.organizationId, payment.customerId, payment.subscriptionId, payment.provider, payment.providerTransactionId, payment.amountMinor, payment.currency, payment.status, payment.providerReference, payment.receivedAt, payment.correlationId],
+        [payment.organizationId, payment.customerId, payment.subscriptionId, payment.provider, payment.providerTransactionId, payment.amountMinor, payment.currency, payment.status, payment.providerReference, payment.receivedAt, correlationId],
       );
       return result.rows[0];
     }
@@ -53,7 +62,7 @@ export async function recordPaymentEvent(input) {
     if (existing.subscription_id && payment.subscriptionId && existing.subscription_id !== payment.subscriptionId) {
       throw new Error("Payment subscription mismatch for an existing provider transaction");
     }
-    if (existing.correlation_id && existing.correlation_id !== payment.correlationId) {
+    if (existing.correlation_id && payment.correlationId && existing.correlation_id !== payment.correlationId) {
       throw new Error("Payment correlation mismatch for an existing provider transaction");
     }
 
