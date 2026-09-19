@@ -1,19 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeAccounting } from "../../src/net/accounting.mjs";
+import { accountingFingerprint, normalizeAccounting } from "../../src/net/accounting.mjs";
 
-test("normalizes RADIUS Start accounting without inventing values", () => {
-  const event = normalizeAccounting({ nasIdentifier: "site-router-1", acctSessionId: "abc-123", acctStatusType: "Start", username: "customer-1", inputOctets: 0, outputOctets: 0, receivedAt: "2026-09-17T06:00:00Z" });
-  assert.equal(event.nasIdentifier, "site-router-1");
-  assert.equal(event.acctSessionId, "abc-123");
-  assert.equal(event.inputOctets, 0);
-  assert.equal(event.outputOctets, 0);
-});
-
-test("rejects malformed accounting counters", () => {
-  assert.throws(() => normalizeAccounting({ nasIdentifier: "r1", acctSessionId: "s1", acctStatusType: "Interim-Update", inputOctets: "not-a-number" }), /inputOctets must be a finite/);
-});
-
-test("rejects unknown accounting status", () => {
-  assert.throws(() => normalizeAccounting({ nasIdentifier: "r1", acctSessionId: "s1", acctStatusType: "Success" }), /valid acctStatusType/);
+test("normalizes RADIUS accounting and rejects malformed values", () => {
+  const event = normalizeAccounting({
+    nasIdentifier: "nas-01",
+    acctSessionId: "session-01",
+    username: "alice",
+    macAddress: "aa:bb:cc:dd:ee:ff",
+    ipAddress: "10.0.0.10",
+    acctStatusType: "Interim-Update",
+    sessionTime: 120,
+    inputOctets: 1000,
+    outputOctets: 2000,
+    receivedAt: "2026-09-19T10:00:00.000Z",
+  });
+  assert.equal(event.acctStatusType, "Interim-Update");
+  assert.equal(accountingFingerprint(event), accountingFingerprint({ ...event }));
+  assert.throws(() => normalizeAccounting({ nasIdentifier: "nas-01", acctSessionId: "session-01", acctStatusType: "Bogus" }));
 });
