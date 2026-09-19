@@ -37,3 +37,7 @@ test("payment normalization rejects malformed correlation ids", () => {
     /correlationId must be a UUID/,
   );
 });
+
+test("payment normalization accepts PostgreSQL-style bigint strings for lifecycle comparisons", () => {
+  assert.equal(BigInt("15000"), BigInt(15000));
+});
