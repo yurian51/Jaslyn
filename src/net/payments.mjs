@@ -84,3 +84,70 @@ export async function recordPaymentEvent(input) {
     return result.rows[0];
   });
 }
+
+
+export async function verifyPaymentEvent(input) {
+  const payment = normalizePaymentEvent({ ...input, status: "VERIFIED" });
+  if (!payment.providerReference) throw new Error("providerReference is required for payment verification");
+  if (!payment.subscriptionId) throw new Error("subscriptionId is required for payment verification");
+
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `select p.id, p.organization_id, p.customer_id, p.subscription_id, p.provider,
+              p.provider_transaction_id, p.amount_minor, p.currency, p.status,
+              p.provider_reference, p.correlation_id,
+              s.customer_id as subscription_customer_id, s.correlation_id as subscription_correlation_id,
+              pl.organization_id as plan_organization_id, pl.price_minor, pl.currency as plan_currency
+       from net_payments p
+       join net_subscriptions s on s.id = p.subscription_id
+       join net_plans pl on pl.id = s.plan_id
+       where p.provider = $1 and p.provider_transaction_id = $2
+       for update of p, s, pl`,
+      [payment.provider, payment.providerTransactionId],
+    );
+    const existing = result.rows[0];
+    if (!existing) throw new Error("Payment not found");
+
+    if (existing.organization_id !== payment.organizationId ||
+        existing.customer_id !== payment.customerId ||
+        existing.subscription_id !== payment.subscriptionId ||
+        existing.subscription_customer_id !== payment.customerId ||
+        existing.plan_organization_id !== payment.organizationId) {
+      throw new Error("Payment customer, organization or subscription mismatch");
+    }
+    if (String(existing.amount_minor) !== String(payment.amountMinor) ||
+        String(existing.price_minor) !== String(payment.amountMinor)) {
+      throw new Error("Payment amount mismatch");
+    }
+    if (String(existing.currency).toUpperCase() !== payment.currency ||
+        String(existing.plan_currency).toUpperCase() !== payment.currency) {
+      throw new Error("Payment currency mismatch");
+    }
+    if (existing.correlation_id && payment.correlationId && existing.correlation_id !== payment.correlationId) {
+      throw new Error("Payment correlation mismatch");
+    }
+    if (existing.provider_reference && existing.provider_reference !== payment.providerReference) {
+      throw new Error("Provider reference mismatch");
+    }
+
+    if (["VERIFIED", "SETTLED"].includes(existing.status)) return { ...existing, idempotent: true };
+
+    if (!["INITIATED", "PENDING"].includes(existing.status)) {
+      throw new Error(`Payment cannot be verified from state ${existing.status}`);
+    }
+
+    const updated = await client.query(
+      `update net_payments
+       set status = 'VERIFIED',
+           provider_reference = $2,
+           verified_at = coalesce(verified_at, $3::timestamptz),
+           updated_at = now()
+       where id = $1
+       returning id, organization_id, customer_id, subscription_id, provider,
+                 provider_transaction_id, amount_minor, currency, status,
+                 provider_reference, received_at, verified_at, correlation_id`,
+      [existing.id, payment.providerReference, payment.receivedAt],
+    );
+    return { ...updated.rows[0], idempotent: false };
+  });
+}
