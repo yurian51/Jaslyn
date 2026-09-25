@@ -17,6 +17,9 @@ const resources = {
   incidents: { label: "Incidents", table: "net_incidents" },
   commands: { label: "Network Commands", table: "net_commands" },
   audit: { label: "Audit Log", table: "net_audit_log" },
+  invoices: { label: "Invoices", table: "net_invoices" },
+  wallets: { label: "Wallets", table: "net_wallet_accounts" },
+  vouchers: { label: "Vouchers", table: "net_vouchers" },
 };
 
 async function count(pool, table) {
