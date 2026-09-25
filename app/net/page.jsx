@@ -69,8 +69,7 @@ export default function JaslynNetDashboard() {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      const responses = await Promise.all([
-      const [overviewResponse, healthResponse, catalogResponse] = responses;
+      const [overviewResponse, healthResponse, catalogResponse] = await Promise.all([
         fetch("/api/net/overview", { cache: "no-store" }),
         fetch("/api/net/health", { cache: "no-store" }),
         fetch("/api/net/catalog", { cache: "no-store" }),
