@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { registerOperator, createSession, sessionCookie } from "../../../../src/net/auth.mjs";
+export const dynamic="force-dynamic";
+export async function POST(request){try{const body=await request.json();const result=await registerOperator({...body,request});const token=await createSession({userId:result.user.id,organizationId:result.user.organization_id,request});return NextResponse.json({ok:true,user:{...result.user,organizationId:result.user.organization_id},organization:result.organization},{status:201,headers:{"Set-Cookie":sessionCookie(token),"Cache-Control":"no-store"}})}catch(error){return NextResponse.json({ok:false,error:error instanceof Error?error.message:"Registration failed"},{status:400})}}
