@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { authenticateOperator, sessionCookie } from "../../../../src/net/auth.mjs";
+export const dynamic="force-dynamic";
+export async function POST(request){try{const body=await request.json();const result=await authenticateOperator({...body,request});return NextResponse.json({ok:true,user:result.user},{headers:{"Set-Cookie":sessionCookie(result.token),"Cache-Control":"no-store"}})}catch(error){return NextResponse.json({ok:false,error:error instanceof Error?error.message:"Invalid credentials"},{status:401})}}
