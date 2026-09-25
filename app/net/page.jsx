@@ -70,6 +70,9 @@ export default function JaslynNetDashboard() {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+      const sessionData = await sessionResponse.json();
+      if (!sessionData.authenticated) { window.location.assign("/login"); return; }
       const [overviewResponse, healthResponse, catalogResponse] = await Promise.all([
         fetch("/api/net/overview", { cache: "no-store" }),
         fetch("/api/net/health", { cache: "no-store" }),
