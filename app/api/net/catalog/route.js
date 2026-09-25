@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "../../../../src/net/db.mjs";
 import { getNetworkRuntime } from "../../../../src/net/runtime.mjs";
+import { requireSession } from "../../../../src/net/auth.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,9 @@ async function count(pool, table) {
   }
 }
 
-export async function GET() {
+export async function GET(request) {
+  try { await requireSession(request); } catch (error) { const status = error instanceof Error && error.message === "FORBIDDEN" ? 403 : 401; return NextResponse.json({ ok:false, error:error instanceof Error ? error.message : "Unauthorized" }, { status }); }
+
   const runtime = getNetworkRuntime();
   const pool = await getPool();
 
