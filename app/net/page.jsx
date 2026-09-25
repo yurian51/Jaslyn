@@ -59,6 +59,7 @@ export default function JaslynNetDashboard() {
   const [now, setNow] = useState(new Date());
   const [live, setLive] = useState(null);
   const [health, setHealth] = useState(null);
+  const [catalog, setCatalog] = useState(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -68,15 +69,19 @@ export default function JaslynNetDashboard() {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      const [overviewResponse, healthResponse] = await Promise.all([
+      const responses = await Promise.all([
+      const [overviewResponse, healthResponse, catalogResponse] = responses;
         fetch("/api/net/overview", { cache: "no-store" }),
         fetch("/api/net/health", { cache: "no-store" }),
+        fetch("/api/net/catalog", { cache: "no-store" }),
       ]);
       const overview = overviewResponse.ok || overviewResponse.status === 503 || overviewResponse.status === 502 ? await overviewResponse.json() : null;
       const healthData = healthResponse.ok ? await healthResponse.json() : null;
+      const catalogData = catalogResponse.ok || catalogResponse.status === 503 ? await catalogResponse.json() : null;
       if (!cancelled) {
         setLive(overview);
         setHealth(healthData);
+        setCatalog(catalogData);
       }
     };
     refresh().catch(() => {
@@ -104,6 +109,61 @@ export default function JaslynNetDashboard() {
     ["Captive Portal", health?.runtime?.capabilities?.hotspotSessions ? "Connected" : "Not configured"],
     ["Telemetry", "Not configured"],
   ];
+
+  const workspaceMap = {
+    customers: { key: "customers", eyebrow: "SUBSCRIBER PLANE", title: "Customer Registry", body: "Authoritative subscriber records, lifecycle state and account ownership belong here. Personal records are not exposed until an authenticated tenant context is established.", actions: ["Add customer", "Import subscribers"] },
+    plans: { key: "plans", eyebrow: "COMMERCIAL PLANE", title: "Plans & Packages", body: "Package definitions are sourced from the billing schema and must remain aligned with network policy enforcement.", actions: ["Create package", "Review policies"] },
+    vouchers: { key: null, eyebrow: "ACCESS PLANE", title: "Voucher Operations", body: "Voucher issuance, redemption and reseller assignment require a persisted voucher engine. No synthetic voucher codes are shown.", actions: ["Configure voucher engine", "Review redemption policy"] },
+    payments: { key: "payments", eyebrow: "PAYMENT PLANE", title: "Payments & Reconciliation", body: "Payment state remains provider-verified and idempotent. Uncertain callbacks never become successful transactions.", actions: ["Configure provider", "Open reconciliation"] },
+    subscriptions: { key: "subscriptions", eyebrow: "SERVICE PLANE", title: "Subscriptions & Entitlements", body: "Subscription state and entitlement state are separate. Provisioning cannot be inferred from payment alone.", actions: ["Review entitlements", "Inspect lifecycle"] },
+    hotspot: { key: null, eyebrow: "ACCESS PLANE", title: "Hotspot / Captive Portal", body: "The customer portal exists separately from this operator surface. Network activation requires a configured provider and verified payment path.", actions: ["Open customer portal", "Configure hotspot"] },
+    network: { key: "networks", eyebrow: "NETWORK PLANE", title: "Network Control", body: "Provider-neutral network operations are exposed only through registered adapters. Commands require authorization, timeout, audit and verification.", actions: ["Review providers", "Inspect command queue"] },
+    devices: { key: "devices", eyebrow: "NETWORK PLANE", title: "Devices & Routers", body: "Device state is authoritative only when sourced from a configured adapter or persisted heartbeat.", actions: ["Register device", "Run health check"] },
+    aaa: { key: null, eyebrow: "IDENTITY PLANE", title: "RADIUS / AAA", body: "Accounting transport is implemented, while full authentication and authorization remain separate capabilities. The console will not label accounting as complete AAA.", actions: ["Inspect accounting", "Configure RADIUS"] },
+    qos: { key: null, eyebrow: "POLICY PLANE", title: "Bandwidth & QoS", body: "Speed, quota and policy compilation are available in the network core. Enforcement requires a connected provider.", actions: ["Review policy compiler", "Configure provider"] },
+    sessions: { key: "sessions", eyebrow: "IDENTITY + ACCOUNTING", title: "Sessions & Accounting", body: "Sessions are distinct from subscriptions. Active state must come from AAA/accounting evidence and can become stale.", actions: ["Inspect sessions", "Review accounting"] },
+    monitoring: { key: "incidents", eyebrow: "OBSERVABILITY", title: "Monitoring & Alerts", body: "Health and incidents are displayed only when supported by telemetry or persisted operational state. Stale evidence is not presented as live.", actions: ["Inspect incidents", "Configure telemetry"] },
+    reports: { key: null, eyebrow: "REPORTING PLANE", title: "Reports & Analytics", body: "Reports will be generated from authoritative billing, subscriber, session and network records. No fabricated revenue or usage charts are rendered.", actions: ["Configure reporting", "Review data sources"] },
+    sites: { key: "sites", eyebrow: "MULTI-SITE PLANE", title: "Multi-Site Management", body: "Sites and networks are tenant-scoped database entities. Cross-tenant visibility requires server-side authorization.", actions: ["Add site", "Review site topology"] },
+  };
+
+  function Workspace({ config }) {
+    const resource = config.key ? catalog?.resources?.[config.key] : null;
+    const state = resource?.state || (catalog?.configured ? "NOT_CONNECTED" : "NOT_CONFIGURED");
+    const count = resource?.count;
+    const capabilities = catalog?.runtime?.capabilities || {};
+    const capabilityRows = [
+      ["Persistent database", capabilities.persistentBilling],
+      ["Transactional DB", capabilities.transactionalDatabase],
+      ["Network commands", capabilities.networkCommands],
+      ["Device adapter", capabilities.devices],
+      ["Session adapter", capabilities.sessions],
+      ["Hotspot sessions", capabilities.hotspotSessions],
+      ["RADIUS accounting transport", capabilities.radiusAccountingTransport],
+      ["Telemetry", capabilities.telemetry],
+    ];
+    return (
+      <section className={styles.workspace}>
+        <article className={styles.card + " " + styles.workspaceHero}>
+          <span className={styles.cardEyebrow}>{config.eyebrow}</span>
+          <div className={styles.workspaceTitle}><div><h2>{config.title}</h2><p>{config.body}</p></div><span className={styles.sourceState}>{state}</span></div>
+          <div className={styles.workspaceActions}>{config.actions.map((action) => <button key={action} className={styles.secondary}>{action}</button>)}</div>
+        </article>
+        <div className={styles.workspaceGrid}>
+          <article className={styles.card + " " + styles.resourceCard}>
+            <span className={styles.cardEyebrow}>AUTHORITATIVE STORE</span>
+            <strong>{count == null ? "—" : count}</strong>
+            <h3>{resource?.label || "Resource records"}</h3>
+            <p>{resource ? "Count read directly from PostgreSQL. No sample rows are generated." : "This module has no persisted resource endpoint yet, so the console shows an honest unconfigured state."}</p>
+          </article>
+          <article className={styles.card + " " + styles.capabilityCard}>
+            <span className={styles.cardEyebrow}>RUNTIME CAPABILITIES</span>
+            {capabilityRows.map(([label, enabled]) => <div className={styles.capabilityRow} key={label}><span>{label}</span><b className={enabled ? styles.capOn : styles.capOff}>{enabled ? "AVAILABLE" : "NOT CONFIGURED"}</b></div>)}
+          </article>
+        </div>
+      </section>
+    );
+  }
 
   function select(id) {
     setActive(id);
@@ -168,7 +228,7 @@ export default function JaslynNetDashboard() {
             {kpis.map(([label, value, source, tone]) => <article className={`${styles.kpi} ${styles[tone]}`} key={label}><div className={styles.kpiTop}><span>{label}</span><Spark tone={tone} /></div><strong>{live?.metrics?.[label] ?? value}</strong><small>{source}</small></article>)}
           </section>
 
-          <section className={styles.dashboardGrid}>
+          {active === "overview" ? <section className={styles.dashboardGrid}>
             <article className={`${styles.card} ${styles.topologyCard}`}>
               <div className={styles.cardHead}><div><span className={styles.cardEyebrow}>NETWORK STATE</span><h2>Network Map & Topology</h2></div><div className={styles.tabs}><button className={styles.tabActive}>Topology</button><button>Map</button><button>List</button></div></div>
               <div className={styles.topology}>
@@ -199,7 +259,7 @@ export default function JaslynNetDashboard() {
               <div className={styles.actionGrid}>{["Refresh Sessions", "Sync Routers", "Apply Policy", "Disconnect User", "View Incidents", "Audit Logs"].map((label, i) => <button key={label} className={i === 3 ? styles.dangerAction : ""}><span>{["↻", "⇄", "ϟ", "×", "!", "≡"][i]}</span>{label}</button>)}</div>
               <p className={styles.actionNote}>Destructive actions require a verified provider and a separate network command secret. No command is executed from an unverified UI state.</p>
             </article>
-          </section>
+          </section> : <Workspace config={workspaceMap[active]} />}
 
           <footer className={styles.footer}><span><WifiMark /> JASLYN <b>NET</b></span><small>CONNECTING PEOPLE • EMPOWERING BUSINESSES • OPERATING REAL NETWORKS</small><small>AI-independent core • Vendor-neutral boundaries • Evidence over claims</small></footer>
         </div>
