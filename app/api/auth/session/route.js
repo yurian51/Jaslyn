@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { getSession } from "../../../../src/net/auth.mjs";
+export const dynamic="force-dynamic";
+export async function GET(request){const session=await getSession(request);return NextResponse.json({authenticated:Boolean(session),session:session?{userId:session.user_id,organizationId:session.organization_id,email:session.email,fullName:session.full_name,role:session.role,expiresAt:session.expires_at}:null},{headers:{"Cache-Control":"no-store"}})}
