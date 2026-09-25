@@ -148,6 +148,45 @@ export async function verifyPaymentEvent(input) {
                  provider_reference, received_at, verified_at, correlation_id`,
       [existing.id, payment.providerReference, payment.receivedAt],
     );
-    return { ...updated.rows[0], idempotent: false };
+
+    const invoiceResult = await client.query(
+      `select id, total_minor, paid_minor, status
+       from net_invoices
+       where organization_id = $1 and customer_id = $2 and subscription_id = $3
+         and status not in ('CANCELLED','REFUNDED','PAID')
+       order by due_at nulls last, created_at asc
+       limit 1
+       for update`,
+      [payment.organizationId, payment.customerId, payment.subscriptionId],
+    );
+    const invoice = invoiceResult.rows[0];
+    let invoiceSettlement = null;
+    if (invoice) {
+      const outstanding = BigInt(invoice.total_minor) - BigInt(invoice.paid_minor);
+      const amount = BigInt(payment.amountMinor);
+      if (amount > outstanding) throw new Error("Payment exceeds the outstanding invoice balance");
+      const allocation = await client.query(
+        `insert into net_invoice_payments (invoice_id, payment_id, amount_minor)
+         values ($1,$2,$3)
+         on conflict (invoice_id,payment_id) do nothing
+         returning amount_minor`,
+        [invoice.id, existing.id, payment.amountMinor],
+      );
+      if (allocation.rowCount) {
+        const nextPaid = BigInt(invoice.paid_minor) + amount;
+        const nextStatus = nextPaid === BigInt(invoice.total_minor) ? "PAID" : "PARTIALLY_PAID";
+        await client.query(
+          `update net_invoices
+           set paid_minor = $2, status = $3, paid_at = case when $3 = 'PAID' then coalesce(paid_at, now()) else paid_at end, updated_at = now()
+           where id = $1`,
+          [invoice.id, nextPaid.toString(), nextStatus],
+        );
+        invoiceSettlement = { invoiceId: invoice.id, allocatedMinor: payment.amountMinor, status: nextStatus };
+      } else {
+        invoiceSettlement = { invoiceId: invoice.id, allocatedMinor: 0, status: invoice.status, idempotent: true };
+      }
+    }
+
+    return { ...updated.rows[0], idempotent: false, invoiceSettlement };
   });
 }
